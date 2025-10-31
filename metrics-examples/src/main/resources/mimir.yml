@@ -1,0 +1,8 @@
+multitenancy_enabled: false
+
+server:
+  http_listen_port: 9009
+
+ingester:
+  ring:
+    replication_factor: 1
