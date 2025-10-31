@@ -9,7 +9,8 @@ import java.net.http.HttpRequest.BodyPublishers;
 import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.util.concurrent.CompletableFuture;
-import org.agrona.CloseHelper;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import org.agrona.LangUtil;
 import org.agrona.concurrent.Agent;
 import org.agrona.concurrent.AgentTerminationException;
@@ -37,6 +38,7 @@ class MimirPublisherAgent implements Agent {
 
   private final Delay retryInterval;
   private final Delay publishInterval;
+  private ExecutorService executor;
   private HttpClient httpClient;
   private CompletableFuture<HttpResponse<String>> future;
   private State state = State.CLOSED;
@@ -90,7 +92,14 @@ class MimirPublisherAgent implements Agent {
       return 0;
     }
 
-    httpClient = HttpClient.newHttpClient();
+    executor =
+        Executors.newSingleThreadExecutor(
+            r -> {
+              final var thread = new Thread(r);
+              thread.setDaemon(true);
+              return thread;
+            });
+    httpClient = HttpClient.newBuilder().executor(executor).build();
     publishInterval.delay();
 
     state(State.RUNNING);
@@ -154,8 +163,12 @@ class MimirPublisherAgent implements Agent {
   }
 
   private int cleanup() {
-    CloseHelper.quietClose(httpClient);
+    if (executor != null) {
+      executor.shutdownNow();
+    }
+    // CloseHelper.quietClose(httpClient);
     httpClient = null;
+    executor = null;
 
     if (future != null) {
       future.cancel(true);
