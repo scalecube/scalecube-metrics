@@ -179,13 +179,12 @@ public class MetricsRecorder implements AutoCloseable {
   public static class Context {
 
     public static final String METRICS_DIRECTORY_NAME_PROP_NAME =
-        "io.scalecube.metrics.recorder.metricsDirectoryName";
+        "scalecube.metrics.recorder.metricsDirectoryName";
     public static final String DIR_DELETE_ON_SHUTDOWN_PROP_NAME =
-        "io.scalecube.metrics.recorder.dirDeleteOnShutdown";
+        "scalecube.metrics.recorder.dirDeleteOnShutdown";
     public static final String METRICS_BUFFER_LENGTH_PROP_NAME =
-        "io.scalecube.metrics.recorder.metricsBufferLength";
-    public static final String IDLE_STRATEGY_PROP_NAME =
-        "io.scalecube.metrics.recorder.idleStrategy";
+        "scalecube.metrics.recorder.metricsBufferLength";
+    public static final String IDLE_STRATEGY_PROP_NAME = "scalecube.metrics.recorder.idleStrategy";
 
     public static final String METRICS_FILE = "metrics.dat";
     public static final String DEFAULT_METRICS_DIR_NAME;

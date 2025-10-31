@@ -118,17 +118,17 @@ public class MetricsTransmitter implements AutoCloseable {
   public static class Context {
 
     public static final String METRICS_DIRECTORY_NAME_PROP_NAME =
-        "io.scalecube.metrics.transmitter.metricsDirectoryName";
+        "scalecube.metrics.transmitter.metricsDirectoryName";
     public static final String WARN_IF_METRICS_NOT_EXISTS_PROP_NAME =
-        "io.scalecube.metrics.transmitter.warnIfMetricsNotExists";
+        "scalecube.metrics.transmitter.warnIfMetricsNotExists";
     public static final String RETRY_INTERVAL_PROP_NAME =
-        "io.scalecube.metrics.transmitter.retryInterval";
+        "scalecube.metrics.transmitter.retryInterval";
     public static final String HEARTBEAT_TIMEOUT_PROP_NAME =
-        "io.scalecube.metrics.transmitter.heartbeatTimeout";
+        "scalecube.metrics.transmitter.heartbeatTimeout";
     public static final String BROADCAST_BUFFER_LENGTH_PROP_NAME =
-        "io.scalecube.metrics.transmitter.broadcastBufferLength";
+        "scalecube.metrics.transmitter.broadcastBufferLength";
     public static final String IDLE_STRATEGY_PROP_NAME =
-        "io.scalecube.metrics.transmitter.idleStrategy";
+        "scalecube.metrics.transmitter.idleStrategy";
 
     public static final int DEFAULT_METRICS_BROADCAST_BUFFER_LENGTH = 32 * 1024 * 1024;
 
