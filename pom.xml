@@ -51,9 +51,9 @@
   </repositories>
 
   <scm>
-    <url>https://github.com/scalecube/scalecube-services</url>
-    <connection>scm:git:https://github.com/scalecube/scalecube-services.git</connection>
-    <developerConnection>scm:git:https://github.com/scalecube/scalecube-services.git
+    <url>https://github.com/scalecube/scalecube-metrics</url>
+    <connection>scm:git:https://github.com/scalecube/scalecube-metrics.git</connection>
+    <developerConnection>scm:git:https://github.com/scalecube/scalecube-metrics.git
     </developerConnection>
     <tag>HEAD</tag>
   </scm>
