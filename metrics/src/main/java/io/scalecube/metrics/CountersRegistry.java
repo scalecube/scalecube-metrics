@@ -76,11 +76,11 @@ public class CountersRegistry implements AutoCloseable {
   public static class Context {
 
     public static final String COUNTERS_VALUES_BUFFER_LENGTH_PROP_NAME =
-        "io.scalecube.metrics.counters.countersValuesBufferLength";
+        "scalecube.metrics.counters.countersValuesBufferLength";
     public static final String COUNTERS_DIR_NAME_PROP_NAME =
-        "io.scalecube.metrics.counters.countersDirectoryName";
+        "scalecube.metrics.counters.countersDirectoryName";
     public static final String DIR_DELETE_ON_SHUTDOWN_PROP_NAME =
-        "io.scalecube.metrics.counters.dirDeleteOnShutdown";
+        "scalecube.metrics.counters.dirDeleteOnShutdown";
 
     public static final String COUNTERS_FILE = "counters.dat";
     public static final String DEFAULT_COUNTERS_DIR_NAME;
