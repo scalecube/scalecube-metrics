@@ -9,6 +9,7 @@
   </parent>
 
   <artifactId>scalecube-metrics-mimir</artifactId>
+  <name>${project.artifactId}</name>
 
   <properties>
     <protobuf-java.version>4.31.1</protobuf-java.version>
