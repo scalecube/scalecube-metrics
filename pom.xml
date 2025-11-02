@@ -1,11 +1,13 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+  xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
   <modelVersion>4.0.0</modelVersion>
 
   <parent>
     <groupId>io.scalecube</groupId>
     <artifactId>scalecube-parent</artifactId>
-    <version>0.3.12</version>
+    <version>0.3.14</version>
   </parent>
 
   <artifactId>scalecube-metrics-parent</artifactId>
@@ -57,21 +59,7 @@
   </scm>
 
   <properties>
-    <agrona.version>2.2.4</agrona.version>
-    <sbe.version>1.35.6</sbe.version>
-    <hdrhistogram.version>2.1.12</hdrhistogram.version>
-    <slf4j.version>1.7.36</slf4j.version>
-
-    <junit.version>5.13.4</junit.version>
-    <mockito.version>5.19.0</mockito.version>
-    <hamcrest.version>1.3</hamcrest.version>
-    <testcontainers.version>1.21.3</testcontainers.version>
-    <aeron.version>1.48.6</aeron.version>
-    <byte-buddy.version>1.15.1</byte-buddy.version>
-    <jmh.version>1.37</jmh.version>
-    <log4j.version>2.17.2</log4j.version>
-    <disruptor.version>3.4.2</disruptor.version>
-    <jackson.version>2.19.2</jackson.version>
+    <scalecube-test-support.version>0.1.0</scalecube-test-support.version>
 
     <distributionManagement.url>https://maven.pkg.github.com/scalecube/scalecube-metrics
     </distributionManagement.url>
@@ -87,153 +75,14 @@
     <module>metrics-prometheus</module>
   </modules>
 
-  <dependencyManagement>
-    <dependencies>
-      <!-- Agrona -->
-      <dependency>
-        <groupId>org.agrona</groupId>
-        <artifactId>agrona</artifactId>
-        <version>${agrona.version}</version>
-      </dependency>
-
-      <!-- Aeron -->
-      <dependency>
-        <groupId>io.aeron</groupId>
-        <artifactId>aeron-agent</artifactId>
-        <version>${aeron.version}</version>
-      </dependency>
-      <dependency>
-        <groupId>io.aeron</groupId>
-        <artifactId>aeron-all</artifactId>
-        <version>${aeron.version}</version>
-      </dependency>
-      <dependency>
-        <groupId>io.aeron</groupId>
-        <artifactId>aeron-driver</artifactId>
-        <version>${aeron.version}</version>
-      </dependency>
-      <dependency>
-        <groupId>io.aeron</groupId>
-        <artifactId>aeron-client</artifactId>
-        <version>${aeron.version}</version>
-      </dependency>
-      <dependency>
-        <groupId>io.aeron</groupId>
-        <artifactId>aeron-cluster</artifactId>
-        <version>${aeron.version}</version>
-      </dependency>
-      <dependency>
-        <groupId>io.aeron</groupId>
-        <artifactId>aeron-archive</artifactId>
-        <version>${aeron.version}</version>
-      </dependency>
-
-      <!-- Byte Buddy -->
-      <dependency>
-        <groupId>net.bytebuddy</groupId>
-        <artifactId>byte-buddy</artifactId>
-        <version>${byte-buddy.version}</version>
-      </dependency>
-      <dependency>
-        <groupId>net.bytebuddy</groupId>
-        <artifactId>byte-buddy-agent</artifactId>
-        <version>${byte-buddy.version}</version>
-      </dependency>
-
-      <!-- HdrHistogram -->
-      <dependency>
-        <groupId>org.hdrhistogram</groupId>
-        <artifactId>HdrHistogram</artifactId>
-        <version>${hdrhistogram.version}</version>
-      </dependency>
-
-      <!-- JMH -->
-      <dependency>
-        <groupId>org.openjdk.jmh</groupId>
-        <artifactId>jmh-core</artifactId>
-        <version>${jmh.version}</version>
-      </dependency>
-      <dependency>
-        <groupId>org.openjdk.jmh</groupId>
-        <artifactId>jmh-generator-annprocess</artifactId>
-        <version>${jmh.version}</version>
-      </dependency>
-
-      <!-- Logging -->
-      <dependency>
-        <groupId>org.slf4j</groupId>
-        <artifactId>slf4j-api</artifactId>
-        <version>${slf4j.version}</version>
-      </dependency>
-      <dependency>
-        <groupId>org.apache.logging.log4j</groupId>
-        <artifactId>log4j-bom</artifactId>
-        <version>${log4j.version}</version>
-        <type>pom</type>
-        <scope>import</scope>
-      </dependency>
-      <dependency>
-        <groupId>com.lmax</groupId>
-        <artifactId>disruptor</artifactId>
-        <version>${disruptor.version}</version>
-      </dependency>
-
-      <!-- Jackson -->
-      <dependency>
-        <groupId>com.fasterxml.jackson</groupId>
-        <artifactId>jackson-bom</artifactId>
-        <version>${jackson.version}</version>
-        <type>pom</type>
-        <scope>import</scope>
-      </dependency>
-
-      <!-- Tests -->
-      <dependency>
-        <groupId>org.junit</groupId>
-        <artifactId>junit-bom</artifactId>
-        <version>${junit.version}</version>
-        <type>pom</type>
-        <scope>import</scope>
-      </dependency>
-      <dependency>
-        <groupId>org.mockito</groupId>
-        <artifactId>mockito-core</artifactId>
-        <version>${mockito.version}</version>
-      </dependency>
-      <dependency>
-        <groupId>org.mockito</groupId>
-        <artifactId>mockito-junit-jupiter</artifactId>
-        <version>${mockito.version}</version>
-        <exclusions>
-          <exclusion>
-            <groupId>net.bytebuddy</groupId>
-            <artifactId>*</artifactId>
-          </exclusion>
-        </exclusions>
-      </dependency>
-      <dependency>
-        <groupId>org.testcontainers</groupId>
-        <artifactId>testcontainers-bom</artifactId>
-        <version>${testcontainers.version}</version>
-        <type>pom</type>
-        <scope>import</scope>
-      </dependency>
-    </dependencies>
-  </dependencyManagement>
-
-  <build>
-    <plugins>
-      <plugin>
-        <artifactId>maven-surefire-plugin</artifactId>
-        <configuration>
-          <argLine>
-            -javaagent:${settings.localRepository}/org/mockito/mockito-core/${mockito.version}/mockito-core-${mockito.version}.jar
-            --add-exports java.base/jdk.internal.misc=ALL-UNNAMED
-            --add-exports java.base/sun.nio.ch=ALL-UNNAMED
-          </argLine>
-        </configuration>
-      </plugin>
-    </plugins>
-  </build>
+  <dependencies>
+    <!-- Tests -->
+    <dependency>
+      <groupId>io.scalecube</groupId>
+      <artifactId>scalecube-test-support</artifactId>
+      <version>${scalecube-test-support.version}</version>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
 
 </project>
