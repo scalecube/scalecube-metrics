@@ -202,7 +202,7 @@ public class CountersRegistry implements AutoCloseable {
 
     public Context countersValuesBufferLength(String countersValuesBufferLength) {
       if (countersValuesBufferLength != null) {
-        this.countersValuesBufferLength = Integer.parseInt(countersValuesBufferLength);
+        return countersValuesBufferLength(Integer.parseInt(countersValuesBufferLength));
       }
       return this;
     }
@@ -236,7 +236,7 @@ public class CountersRegistry implements AutoCloseable {
 
     public Context dirDeleteOnShutdown(String dirDeleteOnShutdown) {
       if (dirDeleteOnShutdown != null) {
-        this.dirDeleteOnShutdown = Boolean.parseBoolean(dirDeleteOnShutdown);
+        return dirDeleteOnShutdown(Boolean.parseBoolean(dirDeleteOnShutdown));
       }
       return this;
     }

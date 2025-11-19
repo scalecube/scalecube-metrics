@@ -255,7 +255,7 @@ public class MetricsTransmitter implements AutoCloseable {
 
     public Context warnIfMetricsNotExists(String warnIfMetricsNotExists) {
       if (warnIfMetricsNotExists != null) {
-        this.warnIfMetricsNotExists = Boolean.parseBoolean(warnIfMetricsNotExists);
+        return warnIfMetricsNotExists(Boolean.parseBoolean(warnIfMetricsNotExists));
       }
       return this;
     }
@@ -280,8 +280,8 @@ public class MetricsTransmitter implements AutoCloseable {
 
     public Context retryInterval(String retryInterval) {
       if (retryInterval != null) {
-        this.retryInterval =
-            Duration.ofNanos(SystemUtil.parseDuration("retryInterval", retryInterval));
+        return retryInterval(
+            Duration.ofNanos(SystemUtil.parseDuration("retryInterval", retryInterval)));
       }
       return this;
     }
@@ -297,8 +297,8 @@ public class MetricsTransmitter implements AutoCloseable {
 
     public Context heartbeatTimeout(String heartbeatTimeout) {
       if (heartbeatTimeout != null) {
-        this.heartbeatTimeout =
-            Duration.ofNanos(SystemUtil.parseDuration("heartbeatTimeout", heartbeatTimeout));
+        return heartbeatTimeout(
+            Duration.ofNanos(SystemUtil.parseDuration("heartbeatTimeout", heartbeatTimeout)));
       }
       return this;
     }
@@ -329,8 +329,8 @@ public class MetricsTransmitter implements AutoCloseable {
     public Context idleStrategy(String idleStrategy) {
       if (idleStrategy != null) {
         try {
-          this.idleStrategy =
-              (IdleStrategy) Class.forName(idleStrategy).getConstructor().newInstance();
+          return idleStrategy(
+              (IdleStrategy) Class.forName(idleStrategy).getConstructor().newInstance());
         } catch (Exception ex) {
           LangUtil.rethrowUnchecked(ex);
         }
@@ -353,7 +353,7 @@ public class MetricsTransmitter implements AutoCloseable {
 
     public Context broadcastBufferLength(String broadcastBufferLength) {
       if (broadcastBufferLength != null) {
-        this.broadcastBufferLength = Integer.parseInt(broadcastBufferLength);
+        return broadcastBufferLength(Integer.parseInt(broadcastBufferLength));
       }
       return this;
     }

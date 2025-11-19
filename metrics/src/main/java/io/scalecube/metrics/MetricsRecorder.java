@@ -362,7 +362,7 @@ public class MetricsRecorder implements AutoCloseable {
 
     public Context dirDeleteOnShutdown(String dirDeleteOnShutdown) {
       if (dirDeleteOnShutdown != null) {
-        this.dirDeleteOnShutdown = Boolean.parseBoolean(dirDeleteOnShutdown);
+        return dirDeleteOnShutdown(Boolean.parseBoolean(dirDeleteOnShutdown));
       }
       return this;
     }
@@ -396,7 +396,7 @@ public class MetricsRecorder implements AutoCloseable {
 
     public Context metricsBufferLength(String metricsBufferLength) {
       if (metricsBufferLength != null) {
-        this.metricsBufferLength = Integer.parseInt(metricsBufferLength);
+        return metricsBufferLength(Integer.parseInt(metricsBufferLength));
       }
       return this;
     }
@@ -427,8 +427,8 @@ public class MetricsRecorder implements AutoCloseable {
     public Context idleStrategy(String idleStrategy) {
       if (idleStrategy != null) {
         try {
-          this.idleStrategy =
-              (IdleStrategy) Class.forName(idleStrategy).getConstructor().newInstance();
+          return idleStrategy(
+              (IdleStrategy) Class.forName(idleStrategy).getConstructor().newInstance());
         } catch (Exception ex) {
           LangUtil.rethrowUnchecked(ex);
         }
