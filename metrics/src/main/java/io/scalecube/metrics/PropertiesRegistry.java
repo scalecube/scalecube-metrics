@@ -62,36 +62,15 @@ public class PropertiesRegistry {
   }
 
   /**
-   * Retrieves {@link Byte} property.
-   *
-   * @param countersReader countersReader
-   * @param name property name
-   * @return property value, or {@code null} if not found
-   */
-  public static Byte getByteProperty(CountersReader countersReader, String name) {
-    return getProperty(countersReader, name, Byte::parseByte);
-  }
-
-  /**
-   * Retrieves {@link Short} property.
-   *
-   * @param countersReader countersReader
-   * @param name property name
-   * @return property value, or {@code null} if not found
-   */
-  public static Short getShortProperty(CountersReader countersReader, String name) {
-    return getProperty(countersReader, name, Short::parseShort);
-  }
-
-  /**
    * Retrieves {@link Integer} property.
    *
    * @param countersReader countersReader
    * @param name property name
-   * @return property value, or {@code null} if not found
+   * @return property value, or {@code null} if not found or malformed, or throws exception if
+   *     unparsable
    */
-  public static Integer getIntProperty(CountersReader countersReader, String name) {
-    return getProperty(countersReader, name, Integer::parseInt);
+  public static Integer getInt(CountersReader countersReader, String name) {
+    return get(countersReader, name, Integer::parseInt);
   }
 
   /**
@@ -99,21 +78,11 @@ public class PropertiesRegistry {
    *
    * @param countersReader countersReader
    * @param name property name
-   * @return property value, or {@code null} if not found
+   * @return property value, or {@code null} if not found or malformed, or throws exception if
+   *     unparsable
    */
-  public static Long getLongProperty(CountersReader countersReader, String name) {
-    return getProperty(countersReader, name, Long::parseLong);
-  }
-
-  /**
-   * Retrieves {@link Double} property.
-   *
-   * @param countersReader countersReader
-   * @param name property name
-   * @return property value, or {@code null} if not found
-   */
-  public static Double getDoubleProperty(CountersReader countersReader, String name) {
-    return getProperty(countersReader, name, Double::parseDouble);
+  public static Long getLong(CountersReader countersReader, String name) {
+    return get(countersReader, name, Long::parseLong);
   }
 
   /**
@@ -121,11 +90,22 @@ public class PropertiesRegistry {
    *
    * @param countersReader countersReader
    * @param name property name
-   * @return property value, or {@code null} if not found
+   * @return property value, or {@code null} if not found or malformed
    */
-  public static <T extends Enum<T>> T getEnumProperty(
+  public static <T extends Enum<T>> T getEnum(
       CountersReader countersReader, String name, Function<String, T> enumFunc) {
-    return getProperty(countersReader, name, enumFunc);
+    return get(countersReader, name, enumFunc);
+  }
+
+  /**
+   * Retrieves {@link Boolean} property.
+   *
+   * @param countersReader countersReader
+   * @param name property name
+   * @return property value, or {@code null} if not found or malformed
+   */
+  public static Boolean getBoolean(CountersReader countersReader, String name) {
+    return get(countersReader, name, Boolean::parseBoolean);
   }
 
   /**
@@ -133,10 +113,10 @@ public class PropertiesRegistry {
    *
    * @param countersReader countersReader
    * @param name property name
-   * @return property value, or {@code null} if not found
+   * @return property value, or {@code null} if not found or malformed
    */
-  public static String getProperty(CountersReader countersReader, String name) {
-    return getProperty(countersReader, name, s -> s);
+  public static String getString(CountersReader countersReader, String name) {
+    return get(countersReader, name, s -> s);
   }
 
   /**
@@ -146,12 +126,20 @@ public class PropertiesRegistry {
    * @param name property name
    * @param converter function to convert string value
    * @param <T> result type
-   * @return converted property value, or {@code null} if not found
+   * @return converted property value, or {@code null} if not found or malformed
    */
-  public static <T> T getProperty(
+  public static <T> T get(
       CountersReader countersReader, String name, Function<String, T> converter) {
     final var counter = CounterDescriptor.findFirstCounter(countersReader, byPropertyName(name));
-    return counter != null ? converter.apply(counter.label().split("=")[1]) : null;
+    if (counter == null) {
+      return null;
+    }
+    final var label = counter.label();
+    final var equalsIndex = label.indexOf('=');
+    if (equalsIndex == -1) {
+      return null; // malformed label
+    }
+    return converter.apply(label.substring(equalsIndex + 1));
   }
 
   /**
@@ -162,6 +150,11 @@ public class PropertiesRegistry {
    */
   public static Predicate<CounterDescriptor> byPropertyName(String name) {
     return byType(PropertiesRegistry.PROPERTY_COUNTER_TYPE_ID)
-        .and(descriptor -> name.equals(descriptor.label().split("=")[0]));
+        .and(
+            descriptor -> {
+              final var label = descriptor.label();
+              final var equalsIndex = label.indexOf('=');
+              return equalsIndex != -1 && name.equals(label.substring(0, equalsIndex));
+            });
   }
 }
