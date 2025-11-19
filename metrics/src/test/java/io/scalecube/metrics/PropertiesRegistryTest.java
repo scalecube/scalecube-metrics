@@ -37,22 +37,6 @@ class PropertiesRegistryTest {
   }
 
   @Test
-  void byteProperty() {
-    final String name = "byte_property";
-    byte value = 42;
-    propertiesRegistry.put(name, value);
-    assertEquals(Byte.valueOf(value), PropertiesRegistry.getByteProperty(countersManager, name));
-  }
-
-  @Test
-  void shortProperty() {
-    final String name = "short_property";
-    short value = 12345;
-    propertiesRegistry.put(name, value);
-    assertEquals(Short.valueOf(value), PropertiesRegistry.getShortProperty(countersManager, name));
-  }
-
-  @Test
   void intProperty() {
     final String name = "int_property";
     int value = 123456789;
@@ -69,15 +53,6 @@ class PropertiesRegistryTest {
   }
 
   @Test
-  void doubleProperty() {
-    final String name = "double_property";
-    double value = 3.14159;
-    propertiesRegistry.put(name, value);
-    assertEquals(
-        Double.valueOf(value), PropertiesRegistry.getDoubleProperty(countersManager, name));
-  }
-
-  @Test
   void enumProperty() {
     final String name = "enum_property";
     SampleEnum value = SampleEnum.B;
@@ -90,11 +65,11 @@ class PropertiesRegistryTest {
   @Test
   void unknownPropertyReturnsNull() {
     assertNull(PropertiesRegistry.getProperty(countersManager, "nonexistent"));
-    assertNull(PropertiesRegistry.getByteProperty(countersManager, "nonexistent"));
-    assertNull(PropertiesRegistry.getShortProperty(countersManager, "nonexistent"));
+    assertNull(PropertiesRegistry.getIntProperty(countersManager, "nonexistent"));
+    assertNull(PropertiesRegistry.getIntProperty(countersManager, "nonexistent"));
     assertNull(PropertiesRegistry.getIntProperty(countersManager, "nonexistent"));
     assertNull(PropertiesRegistry.getLongProperty(countersManager, "nonexistent"));
-    assertNull(PropertiesRegistry.getDoubleProperty(countersManager, "nonexistent"));
+    assertNull(PropertiesRegistry.getBooleanProperty(countersManager, "nonexistent"));
     assertNull(
         PropertiesRegistry.getEnumProperty(countersManager, "nonexistent", SampleEnum::valueOf));
   }
