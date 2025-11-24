@@ -63,14 +63,6 @@ public class PrometheusAllInOneAeron {
             .withCommand("--config.file=/etc/prometheus/prometheus.yml", "--log.level=debug");
     prometheus.start();
 
-    GenericContainer<?> loki =
-        new GenericContainer<>("grafana/loki")
-            .withNetwork(network)
-            .withNetworkAliases("loki")
-            .withExposedPorts(3100)
-            .withCommand("-config.file=/etc/loki/local-config.yaml");
-    loki.start();
-
     // Start Grafana container
     GenericContainer<?> grafana =
         new GenericContainer<>("grafana/grafana")
@@ -80,18 +72,11 @@ public class PrometheusAllInOneAeron {
             .withEnv("GF_SECURITY_ADMIN_PASSWORD", "password")
             .withCopyFileToContainer(
                 forClasspathResource("prometheus.datasource.yml"),
-                "/etc/grafana/provisioning/datasources/datasource.yml")
-            .withCopyFileToContainer(
-                forClasspathResource("loki.datasource.yml"),
-                "/etc/grafana/provisioning/datasources/loki.yml");
+                "/etc/grafana/provisioning/datasources/datasource.yml");
     grafana.start();
-
-    //    final var lokiPort = loki.getMappedPort(3100);
-    //    final var pushUrl = "http://" + loki.getHost() + ":" + lokiPort + "/loki/api/v1/push";
 
     String grafanaUrl = "http://" + grafana.getHost() + ":" + grafana.getMappedPort(3000);
     System.out.println("Prometheus: " + prometheus.getMappedPort(9090));
-    System.out.println("Loki: " + loki.getMappedPort(3100));
     System.out.println("Grafana: " + grafanaUrl);
 
     final var metricsRecorder = MetricsRecorder.launch();
