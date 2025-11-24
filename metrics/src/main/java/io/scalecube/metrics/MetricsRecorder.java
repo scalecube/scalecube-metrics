@@ -78,11 +78,11 @@ public class MetricsRecorder implements AutoCloseable {
         agentInvoker = null;
         agentRunner = new AgentRunner(context.idleStrategy(), context.errorHandler(), null, agent);
       }
-    } catch (ConcurrentModificationException ex) {
-      throw ex;
-    } catch (Exception ex) {
-      context.close();
-      throw ex;
+    } catch (ConcurrentModificationException e) {
+      throw e;
+    } catch (Exception e) {
+      CloseHelper.quietClose(context::close);
+      throw e;
     }
   }
 

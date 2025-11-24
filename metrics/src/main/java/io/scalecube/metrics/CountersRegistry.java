@@ -44,11 +44,11 @@ public class CountersRegistry implements AutoCloseable {
           new ConcurrentCountersManager(
               new UnsafeBuffer(context.countersMetaDataBuffer()),
               new UnsafeBuffer(context.countersValuesBuffer()));
-    } catch (ConcurrentModificationException ex) {
-      throw ex;
-    } catch (Exception ex) {
+    } catch (ConcurrentModificationException e) {
+      throw e;
+    } catch (Exception e) {
       CloseHelper.quietClose(context::close);
-      throw ex;
+      throw e;
     }
   }
 
