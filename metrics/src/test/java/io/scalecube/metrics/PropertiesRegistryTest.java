@@ -57,7 +57,8 @@ class PropertiesRegistryTest {
     final String name = "enum_property";
     SampleEnum value = SampleEnum.B;
     propertiesRegistry.put(name, value);
-    SampleEnum result = PropertiesRegistry.getEnumProperty(countersManager, name, SampleEnum::valueOf);
+    SampleEnum result =
+        PropertiesRegistry.getEnumProperty(countersManager, name, SampleEnum::valueOf);
     assertEquals(value, result);
   }
 
@@ -69,7 +70,8 @@ class PropertiesRegistryTest {
     assertNull(PropertiesRegistry.getIntProperty(countersManager, "nonexistent"));
     assertNull(PropertiesRegistry.getLongProperty(countersManager, "nonexistent"));
     assertNull(PropertiesRegistry.getBooleanProperty(countersManager, "nonexistent"));
-    assertNull(PropertiesRegistry.getEnumProperty(countersManager, "nonexistent", SampleEnum::valueOf));
+    assertNull(
+        PropertiesRegistry.getEnumProperty(countersManager, "nonexistent", SampleEnum::valueOf));
   }
 
   enum SampleEnum {
