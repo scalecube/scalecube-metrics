@@ -45,7 +45,7 @@ public class CountersReaderAgent implements Agent {
   private final UnsafeBuffer headerBuffer = new UnsafeBuffer();
   private long countersStartTimestamp = -1;
   private long countersPid = -1;
-  private long countersValuesBufferLength = -1;
+  private int countersValuesBufferLength = -1;
   private CountersReader countersReader;
   private State state = State.CLOSED;
 

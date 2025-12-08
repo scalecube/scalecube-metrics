@@ -277,12 +277,12 @@ public class MetricsRecorder implements AutoCloseable {
       if (metricsDir.isDirectory()) {
         final var file = new File(metricsDir, METRICS_FILE);
         if (file.exists()) {
-          final var buffer = mapExistingFile(file, METRICS_FILE);
+          final var mappedByteBuffer = mapExistingFile(file, METRICS_FILE);
           try {
-            if (!LayoutDescriptor.isMetricsHeaderLengthSufficient(buffer.capacity())) {
+            if (!LayoutDescriptor.isMetricsHeaderLengthSufficient(mappedByteBuffer.capacity())) {
               delete(metricsDir, false);
             } else {
-              final var headerBuffer = LayoutDescriptor.createHeaderBuffer(buffer);
+              final var headerBuffer = LayoutDescriptor.createHeaderBuffer(mappedByteBuffer);
               final var startTimestamp = ManagementFactory.getRuntimeMXBean().getStartTime();
               final var pid = ManagementFactory.getRuntimeMXBean().getPid();
               if (!LayoutDescriptor.isMetricsActive(headerBuffer, startTimestamp, pid)) {
@@ -290,7 +290,7 @@ public class MetricsRecorder implements AutoCloseable {
               }
             }
           } finally {
-            BufferUtil.free(buffer);
+            BufferUtil.free(mappedByteBuffer);
           }
         }
       }
@@ -317,14 +317,15 @@ public class MetricsRecorder implements AutoCloseable {
       final var totalLength = headerLength + bufferLength;
 
       if (!file.exists()) {
-        final var buffer = mapNewFile(file, totalLength);
+        final var mappedByteBuffer = mapNewFile(file, totalLength);
         try {
-          final var headerBuffer = LayoutDescriptor.createHeaderBuffer(buffer);
+          final var headerBuffer = LayoutDescriptor.createHeaderBuffer(mappedByteBuffer);
           final var startTimestamp = ManagementFactory.getRuntimeMXBean().getStartTime();
           final var pid = ManagementFactory.getRuntimeMXBean().getPid();
           LayoutDescriptor.fillHeaderBuffer(headerBuffer, startTimestamp, pid, bufferLength);
+          mappedByteBuffer.force();
         } finally {
-          BufferUtil.free(buffer);
+          BufferUtil.free(mappedByteBuffer);
         }
       }
 
@@ -478,7 +479,7 @@ public class MetricsRecorder implements AutoCloseable {
       return headerBuffer.getLong(PID_OFFSET);
     }
 
-    public static long metricsBufferLength(DirectBuffer headerBuffer) {
+    public static int metricsBufferLength(DirectBuffer headerBuffer) {
       return headerBuffer.getInt(METRICS_BUFFER_LENGTH_OFFSET);
     }
 

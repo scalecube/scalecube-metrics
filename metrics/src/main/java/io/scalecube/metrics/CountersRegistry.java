@@ -305,7 +305,7 @@ public class CountersRegistry implements AutoCloseable {
     public static UnsafeBuffer createCountersValuesBuffer(
         ByteBuffer buffer, DirectBuffer headerBuffer) {
       final var countersValuesBufferLength = countersValuesBufferLength(headerBuffer);
-      final int offset = HEADER_LENGTH + countersMetaDataBufferLength(countersValuesBufferLength);
+      final var offset = HEADER_LENGTH + countersMetaDataBufferLength(countersValuesBufferLength);
       final var length = countersValuesBufferLength;
       return new UnsafeBuffer(buffer, offset, length);
     }
