@@ -45,6 +45,7 @@ public class CountersReaderAgent implements Agent {
   private final UnsafeBuffer headerBuffer = new UnsafeBuffer();
   private long countersStartTimestamp = -1;
   private long countersPid = -1;
+  private long countersValuesBufferLength = -1;
   private CountersReader countersReader;
   private State state = State.CLOSED;
 
@@ -119,6 +120,12 @@ public class CountersReaderAgent implements Agent {
     headerBuffer.wrap(countersByteBuffer, 0, LayoutDescriptor.HEADER_LENGTH);
     countersStartTimestamp = LayoutDescriptor.startTimestamp(headerBuffer);
     countersPid = LayoutDescriptor.pid(headerBuffer);
+    countersValuesBufferLength = LayoutDescriptor.countersValuesBufferLength(headerBuffer);
+
+    if (countersValuesBufferLength <= 0) {
+      state(State.CLEANUP);
+      return 0;
+    }
 
     countersReader =
         new CountersReader(
@@ -174,7 +181,7 @@ public class CountersReaderAgent implements Agent {
         LOGGER.warn("[{}] {} has not sufficient length", roleName(), countersFile);
         return false;
       }
-      if (countersStartTimestamp != -1
+      if (countersValuesBufferLength != -1
           && !LayoutDescriptor.isCountersActive(
               headerBuffer, countersStartTimestamp, countersPid)) {
         LOGGER.warn("[{}] {} is not active", roleName(), countersFile);
@@ -193,6 +200,7 @@ public class CountersReaderAgent implements Agent {
     countersFile = null;
     countersStartTimestamp = -1;
     countersPid = -1;
+    countersValuesBufferLength = -1;
 
     State previous = state;
     if (previous != State.CLOSED) { // when it comes from onClose()

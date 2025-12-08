@@ -184,6 +184,7 @@ public class CountersRegistry implements AutoCloseable {
       final var pid = ManagementFactory.getRuntimeMXBean().getPid();
       LayoutDescriptor.fillHeaderBuffer(
           headerBuffer, startTimestamp, pid, countersValuesBufferLength);
+      mappedByteBuffer.force();
 
       countersMetaDataBuffer =
           LayoutDescriptor.createCountersMetaDataBuffer(mappedByteBuffer, headerBuffer);
