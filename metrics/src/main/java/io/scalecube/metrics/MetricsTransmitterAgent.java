@@ -43,6 +43,7 @@ class MetricsTransmitterAgent implements Agent, MessageHandler {
   private final UnsafeBuffer headerBuffer = new UnsafeBuffer();
   private long metricsStartTimestamp = -1;
   private long metricsPid = -1;
+  private int metricsBufferLength = -1;
   private State state = State.CLOSED;
 
   MetricsTransmitterAgent(
@@ -102,16 +103,20 @@ class MetricsTransmitterAgent implements Agent, MessageHandler {
     }
 
     metricsByteBuffer = mapExistingFile(metricsFile, METRICS_FILE);
-    headerBuffer.wrap(metricsByteBuffer, 0, LayoutDescriptor.HEADER_LENGTH);
+    final var headerLength = LayoutDescriptor.HEADER_LENGTH;
+    headerBuffer.wrap(metricsByteBuffer, 0, headerLength);
     metricsStartTimestamp = LayoutDescriptor.startTimestamp(headerBuffer);
     metricsPid = LayoutDescriptor.pid(headerBuffer);
+    metricsBufferLength = LayoutDescriptor.metricsBufferLength(headerBuffer);
 
-    final var headerLength = LayoutDescriptor.HEADER_LENGTH;
-    final var totalLength = metricsByteBuffer.capacity();
-    final var length = totalLength - headerLength;
+    if (metricsBufferLength <= 0) {
+      state(State.CLEANUP);
+      return 0;
+    }
 
     metricsBuffer =
-        new ManyToOneRingBuffer(new UnsafeBuffer(metricsByteBuffer, headerLength, length));
+        new ManyToOneRingBuffer(
+            new UnsafeBuffer(metricsByteBuffer, headerLength, metricsBufferLength));
 
     state(State.RUNNING);
     LOGGER.info("[{}] Initialized, now running", roleName());
@@ -149,7 +154,7 @@ class MetricsTransmitterAgent implements Agent, MessageHandler {
         LOGGER.warn("[{}] {} has not sufficient length", roleName(), metricsFile);
         return false;
       }
-      if (metricsStartTimestamp != -1
+      if (metricsBufferLength != -1
           && !LayoutDescriptor.isMetricsActive(headerBuffer, metricsStartTimestamp, metricsPid)) {
         LOGGER.warn("[{}] {} is not active", roleName(), metricsFile);
         return false;
@@ -173,6 +178,7 @@ class MetricsTransmitterAgent implements Agent, MessageHandler {
     metricsFile = null;
     metricsStartTimestamp = -1;
     metricsPid = -1;
+    metricsBufferLength = -1;
 
     State previous = state;
     if (previous != State.CLOSED) { // when it comes from onClose()
