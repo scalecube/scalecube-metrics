@@ -2,6 +2,7 @@ package io.scalecube.metrics;
 
 import static org.agrona.concurrent.status.CountersReader.KEY_OFFSET;
 import static org.agrona.concurrent.status.CountersReader.MAX_KEY_LENGTH;
+import static org.agrona.concurrent.status.CountersReader.RECORD_ALLOCATED;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -9,7 +10,7 @@ import java.util.Objects;
 import java.util.function.Function;
 import java.util.function.Predicate;
 import org.agrona.DirectBuffer;
-import org.agrona.concurrent.UnsafeBuffer;
+import org.agrona.ExpandableArrayBuffer;
 import org.agrona.concurrent.status.CountersReader;
 
 /**
@@ -31,10 +32,14 @@ public record CounterDescriptor(
     final var metaDataBuffer = countersReader.metaDataBuffer();
     final var metaDataOffset = CountersReader.metaDataOffset(counterId);
 
+    final int recordStatus = metaDataBuffer.getIntVolatile(metaDataOffset);
+    if (recordStatus != RECORD_ALLOCATED) {
+      return null;
+    }
+
     final int keyOffset = metaDataOffset + KEY_OFFSET;
-    byte[] keyBytes = new byte[MAX_KEY_LENGTH];
-    metaDataBuffer.getBytes(keyOffset, keyBytes);
-    final var keyBuffer = new UnsafeBuffer(keyBytes);
+    final var keyBuffer = new ExpandableArrayBuffer(MAX_KEY_LENGTH);
+    metaDataBuffer.getBytes(keyOffset, keyBuffer, 0, keyBuffer.capacity());
 
     final int typeId = countersReader.getCounterTypeId(counterId);
     final var value = countersReader.getCounterValue(counterId);
@@ -80,8 +85,16 @@ public record CounterDescriptor(
       CountersReader countersReader, Predicate<CounterDescriptor> predicate) {
     final var list = new ArrayList<CounterDescriptor>();
     countersReader.forEach(
-        (value, counterId, label) -> {
-          final var descriptor = CounterDescriptor.getCounter(countersReader, counterId);
+        (counterId, typeId, keyBuffer, label) -> {
+          final var keyBufferCopy = new ExpandableArrayBuffer(keyBuffer.capacity());
+          keyBuffer.getBytes(0, keyBufferCopy, 0, keyBuffer.capacity());
+          final var descriptor =
+              new CounterDescriptor(
+                  counterId,
+                  typeId,
+                  countersReader.getCounterValue(counterId),
+                  keyBufferCopy,
+                  label);
           if (predicate.test(descriptor)) {
             list.add(descriptor);
           }
@@ -90,22 +103,22 @@ public record CounterDescriptor(
   }
 
   public static Predicate<CounterDescriptor> byName(String name) {
-    return descriptor -> name.equals(descriptor.label());
+    return descriptor -> descriptor.label().equals(name);
   }
 
   public static Predicate<CounterDescriptor> byValue(long value) {
-    return descriptor -> value == descriptor.value();
+    return descriptor -> descriptor.value() == value;
   }
 
   public static Predicate<CounterDescriptor> byType(int typeId) {
-    return descriptor -> typeId == descriptor.typeId();
+    return descriptor -> descriptor.typeId() == typeId;
   }
 
   public static Predicate<CounterDescriptor> byTag(String tag, byte value) {
     return descriptor -> {
       final var keyCodec = new KeyCodec();
       final var key = keyCodec.decodeKey(descriptor.keyBuffer(), 0);
-      return Objects.equals(value, key.byteValue(tag));
+      return Objects.equals(key.byteValue(tag), value);
     };
   }
 
@@ -113,7 +126,7 @@ public record CounterDescriptor(
     return descriptor -> {
       final var keyCodec = new KeyCodec();
       final var key = keyCodec.decodeKey(descriptor.keyBuffer(), 0);
-      return Objects.equals(value, key.shortValue(tag));
+      return Objects.equals(key.shortValue(tag), value);
     };
   }
 
@@ -121,7 +134,7 @@ public record CounterDescriptor(
     return descriptor -> {
       final var keyCodec = new KeyCodec();
       final var key = keyCodec.decodeKey(descriptor.keyBuffer(), 0);
-      return Objects.equals(value, key.intValue(tag));
+      return Objects.equals(key.intValue(tag), value);
     };
   }
 
@@ -129,7 +142,7 @@ public record CounterDescriptor(
     return descriptor -> {
       final var keyCodec = new KeyCodec();
       final var key = keyCodec.decodeKey(descriptor.keyBuffer(), 0);
-      return Objects.equals(value, key.longValue(tag));
+      return Objects.equals(key.longValue(tag), value);
     };
   }
 
@@ -137,7 +150,7 @@ public record CounterDescriptor(
     return descriptor -> {
       final var keyCodec = new KeyCodec();
       final var key = keyCodec.decodeKey(descriptor.keyBuffer(), 0);
-      return Objects.equals(value, key.doubleValue(tag));
+      return Objects.equals(key.doubleValue(tag), value);
     };
   }
 
@@ -145,7 +158,7 @@ public record CounterDescriptor(
     return descriptor -> {
       final var keyCodec = new KeyCodec();
       final var key = keyCodec.decodeKey(descriptor.keyBuffer(), 0);
-      return Objects.equals(value, key.stringValue(tag));
+      return Objects.equals(key.stringValue(tag), value);
     };
   }
 
@@ -154,7 +167,7 @@ public record CounterDescriptor(
     return descriptor -> {
       final var keyCodec = new KeyCodec();
       final var key = keyCodec.decodeKey(descriptor.keyBuffer(), 0);
-      return Objects.equals(value, key.enumValue(tag, enumFunc));
+      return Objects.equals(key.enumValue(tag, enumFunc), value);
     };
   }
 }
