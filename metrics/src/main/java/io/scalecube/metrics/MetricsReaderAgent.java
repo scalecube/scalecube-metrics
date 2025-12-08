@@ -118,7 +118,6 @@ public class MetricsReaderAgent implements Agent {
   }
 
   private void state(State state) {
-    LOGGER.debug("[{}][state] {}->{}", roleName(), this.state, state);
     this.state = state;
   }
 }
