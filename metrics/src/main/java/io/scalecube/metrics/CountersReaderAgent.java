@@ -143,6 +143,7 @@ public class CountersReaderAgent implements Agent {
     }
 
     readInterval.delay();
+
     if (!isActive(countersFile)) {
       state(State.CLEANUP);
       LOGGER.warn("[{}] {} is not active, proceed to cleanup", roleName(), countersFile);
