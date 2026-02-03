@@ -44,14 +44,11 @@ public class CountersMimirHandler implements CountersHandler {
 
     for (var descriptor : counterDescriptors) {
       final var key = keyCodec.decodeKey(descriptor.keyBuffer(), 0);
-      final var visibility = key.stringValue("visibility");
-      if (!"private".equals(visibility)) {
-        final var name = descriptor.label() != null ? descriptor.label() : key.stringValue("name");
-        if (name != null) {
-          final var tags = toTags(key);
-          final var value = descriptor.value();
-          builder.addTimeseries(toTimeSeries(timestamp, name, tags, value));
-        }
+      final var name = descriptor.label() != null ? descriptor.label() : key.stringValue("name");
+      if (name != null) {
+        final var tags = toTags(key);
+        final var value = descriptor.value();
+        builder.addTimeseries(toTimeSeries(timestamp, name, tags, value));
       }
     }
 

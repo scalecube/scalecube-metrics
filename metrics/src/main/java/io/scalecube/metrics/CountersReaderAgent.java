@@ -9,6 +9,8 @@ import java.io.File;
 import java.nio.MappedByteBuffer;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
 import org.agrona.BufferUtil;
 import org.agrona.concurrent.Agent;
 import org.agrona.concurrent.AgentTerminationException;
@@ -43,6 +45,7 @@ public class CountersReaderAgent implements Agent {
   private File countersFile;
   private MappedByteBuffer countersByteBuffer;
   private final UnsafeBuffer headerBuffer = new UnsafeBuffer();
+  private final KeyCodec keyCodec = new KeyCodec();
   private long countersStartTimestamp = -1;
   private long countersPid = -1;
   private int countersValuesBufferLength = -1;
@@ -113,7 +116,7 @@ public class CountersReaderAgent implements Agent {
 
     if (!isActive(countersFile)) {
       state(State.CLEANUP);
-      return 0;
+      return 1;
     }
 
     countersByteBuffer = mapExistingFile(countersFile, COUNTERS_FILE);
@@ -124,7 +127,7 @@ public class CountersReaderAgent implements Agent {
 
     if (countersValuesBufferLength <= 0) {
       state(State.CLEANUP);
-      return 0;
+      return 1;
     }
 
     countersReader =
@@ -147,20 +150,48 @@ public class CountersReaderAgent implements Agent {
     if (!isActive(countersFile)) {
       state(State.CLEANUP);
       LOGGER.warn("[{}] {} is not active, proceed to cleanup", roleName(), countersFile);
-      return 0;
+      return 1;
     }
 
-    final var timestamp = epochClock.time();
-    final var counterDescriptors = new ArrayList<CounterDescriptor>();
+    countersHandler.accept(epochClock.time(), snapshotCounters());
+    return 0;
+  }
+
+  private List<CounterDescriptor> snapshotCounters() {
+    final var snapshot = new ArrayList<CounterDescriptor>();
+    final var writeEpochs = new HashMap<Integer, CounterDescriptor>();
+    final var writeGroups = new HashMap<Integer, List<CounterDescriptor>>();
+
     countersReader.forEach(
         (counterId, typeId, keyBuffer, label) -> {
-          final var counterValue = countersReader.getCounterValue(counterId);
-          counterDescriptors.add(
-              new CounterDescriptor(counterId, typeId, counterValue, keyBuffer, label));
-        });
-    countersHandler.accept(timestamp, counterDescriptors);
+          final var value = countersReader.getCounterValue(counterId);
+          final var counter = new CounterDescriptor(counterId, typeId, value, keyBuffer, label);
+          final var key = keyCodec.decodeKey(keyBuffer, 0);
 
-    return 0;
+          if (isWriteEpoch(key)) {
+            writeEpochs.put(counterId, counter);
+          } else if (hasWriteEpochId(key)) {
+            writeGroups.computeIfAbsent(writeEpochId(key), k -> new ArrayList<>()).add(counter);
+          } else if (!hasPrivateVisibility(key)) {
+            snapshot.add(counter);
+          }
+        });
+  }
+
+  private static boolean isWriteEpoch(Key key) {
+    return "WRITE_EPOCH".equals(key.stringValue("counterRole"));
+  }
+
+  private static boolean hasWriteEpochId(Key key) {
+    return key.intValue("writeEpochId") != null;
+  }
+
+  private static Integer writeEpochId(Key key) {
+    return key.intValue("writeEpochId");
+  }
+
+  private static boolean hasPrivateVisibility(Key key) {
+    return "PRIVATE".equals(key.stringValue("counterVisibility"));
   }
 
   private boolean isActive(File countersFile) {

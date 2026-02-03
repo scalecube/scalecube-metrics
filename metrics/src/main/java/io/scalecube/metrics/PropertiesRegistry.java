@@ -53,7 +53,8 @@ public class PropertiesRegistry {
             return counterAllocator.newCounter(
                 PROPERTY_COUNTER_TYPE_ID,
                 name + "=" + value,
-                keyFlyweight -> keyFlyweight.tagsCount(1).stringValue("visibility", "private"));
+                keyFlyweight ->
+                    keyFlyweight.tagsCount(1).stringValue("counterVisibility", "PRIVATE"));
           } else {
             countersManager.setCounterLabel(counter.id(), name + "=" + value);
             return counter;
