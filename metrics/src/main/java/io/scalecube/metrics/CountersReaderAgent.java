@@ -9,9 +9,10 @@ import java.io.File;
 import java.nio.MappedByteBuffer;
 import java.time.Duration;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
 import org.agrona.BufferUtil;
+import org.agrona.collections.Int2ObjectHashMap;
+import org.agrona.collections.IntHashSet;
 import org.agrona.concurrent.Agent;
 import org.agrona.concurrent.AgentTerminationException;
 import org.agrona.concurrent.EpochClock;
@@ -159,8 +160,7 @@ public class CountersReaderAgent implements Agent {
 
   private List<CounterDescriptor> snapshotCounters() {
     final var snapshot = new ArrayList<CounterDescriptor>();
-    final var writeEpochs = new HashMap<Integer, CounterDescriptor>();
-    final var writeGroups = new HashMap<Integer, List<CounterDescriptor>>();
+    final var writeGroups = new Int2ObjectHashMap<IntHashSet>();
 
     countersReader.forEach(
         (counterId, typeId, keyBuffer, label) -> {
@@ -168,18 +168,60 @@ public class CountersReaderAgent implements Agent {
           final var counter = new CounterDescriptor(counterId, typeId, value, keyBuffer, label);
           final var key = keyCodec.decodeKey(keyBuffer, 0);
 
-          if (isWriteEpoch(key)) {
-            writeEpochs.put(counterId, counter);
-          } else if (hasWriteEpochId(key)) {
-            writeGroups.computeIfAbsent(writeEpochId(key), k -> new ArrayList<>()).add(counter);
+          if (hasWriteEpochId(key)) {
+            writeGroups.computeIfAbsent(writeEpochId(key), k -> new IntHashSet()).add(counterId);
           } else if (!hasPrivateVisibility(key)) {
             snapshot.add(counter);
           }
         });
+
+    trySnapshotWriteGroups(snapshot, writeGroups);
+    return snapshot;
   }
 
-  private static boolean isWriteEpoch(Key key) {
-    return "WRITE_EPOCH".equals(key.stringValue("counterRole"));
+  private void trySnapshotWriteGroups(
+      List<CounterDescriptor> snapshot, Int2ObjectHashMap<IntHashSet> writeGroups) {
+    writeGroups.forEachInt(
+        (epochId, counterIds) -> {
+          final var epochCounter = CounterDescriptor.getCounter(countersReader, epochId);
+          if (epochCounter != null) {
+            for (int attempt = 0; attempt < 16; attempt++) {
+              final var epochBefore = countersReader.getCounterValue(epochId);
+
+              // odd => writer in progress, retry
+              if ((epochBefore & 1) != 0) {
+                continue;
+              }
+
+              // try read counters, skip if not present
+              final var counters = readCounters(counterIds);
+              if (counters == null) {
+                break;
+              }
+
+              final long epochAfter = countersReader.getCounterValue(epochId);
+              if (epochBefore != epochAfter) {
+                continue;
+              }
+
+              snapshot.addAll(counters);
+              break;
+            }
+          }
+        });
+  }
+
+  private List<CounterDescriptor> readCounters(IntHashSet counterIds) {
+    final var list = new ArrayList<CounterDescriptor>();
+    for (var counterId : counterIds) {
+      final var counter = CounterDescriptor.getCounter(countersReader, counterId);
+      if (counter != null) {
+        list.add(counter);
+      } else {
+        return null;
+      }
+    }
+    return list;
   }
 
   private static boolean hasWriteEpochId(Key key) {
