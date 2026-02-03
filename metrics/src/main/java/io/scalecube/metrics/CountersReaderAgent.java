@@ -230,7 +230,7 @@ public class CountersReaderAgent implements Agent {
   }
 
   private static boolean hasWriteEpochId(Key key) {
-    return key.intValue(WRITE_EPOCH_ID) != null;
+    return writeEpochId(key) != null;
   }
 
   private static Integer writeEpochId(Key key) {
