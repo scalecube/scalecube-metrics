@@ -1,5 +1,8 @@
 package io.scalecube.metrics;
 
+import static io.scalecube.metrics.CounterTags.COUNTER_VISIBILITY;
+import static io.scalecube.metrics.CounterTags.WRITE_EPOCH_ID;
+import static io.scalecube.metrics.CounterVisibility.PRIVATE;
 import static io.scalecube.metrics.CountersRegistry.Context.COUNTERS_FILE;
 import static org.agrona.IoUtil.mapExistingFile;
 
@@ -225,15 +228,15 @@ public class CountersReaderAgent implements Agent {
   }
 
   private static boolean hasWriteEpochId(Key key) {
-    return key.intValue("writeEpochId") != null;
+    return key.intValue(WRITE_EPOCH_ID) != null;
   }
 
   private static Integer writeEpochId(Key key) {
-    return key.intValue("writeEpochId");
+    return key.intValue(WRITE_EPOCH_ID);
   }
 
   private static boolean hasPrivateVisibility(Key key) {
-    return "PRIVATE".equals(key.stringValue("counterVisibility"));
+    return key.enumValue(COUNTER_VISIBILITY, CounterVisibility::get) == PRIVATE;
   }
 
   private boolean isActive(File countersFile) {

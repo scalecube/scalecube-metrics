@@ -1,6 +1,8 @@
 package io.scalecube.metrics;
 
 import static io.scalecube.metrics.CounterDescriptor.byType;
+import static io.scalecube.metrics.CounterTags.COUNTER_VISIBILITY;
+import static io.scalecube.metrics.CounterVisibility.PRIVATE;
 
 import java.util.Map;
 import java.util.Objects;
@@ -54,7 +56,9 @@ public class PropertiesRegistry {
                 PROPERTY_COUNTER_TYPE_ID,
                 name + "=" + value,
                 keyFlyweight ->
-                    keyFlyweight.tagsCount(1).stringValue("counterVisibility", "PRIVATE"));
+                    keyFlyweight
+                        .tagsCount(1)
+                        .enumValue(COUNTER_VISIBILITY, PRIVATE, CounterVisibility::value));
           } else {
             countersManager.setCounterLabel(counter.id(), name + "=" + value);
             return counter;
