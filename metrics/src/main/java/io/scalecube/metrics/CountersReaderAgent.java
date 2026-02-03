@@ -193,6 +193,7 @@ public class CountersReaderAgent implements Agent {
 
               // odd => writer in progress, retry
               if ((epochBefore & 1) != 0) {
+                Thread.onSpinWait();
                 continue;
               }
 
@@ -204,6 +205,7 @@ public class CountersReaderAgent implements Agent {
 
               final long epochAfter = countersReader.getCounterValue(epochId);
               if (epochBefore != epochAfter) {
+                Thread.onSpinWait();
                 continue;
               }
 
