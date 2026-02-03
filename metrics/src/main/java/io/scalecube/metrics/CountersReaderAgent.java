@@ -1,5 +1,8 @@
 package io.scalecube.metrics;
 
+import static io.scalecube.metrics.CounterTags.COUNTER_VISIBILITY;
+import static io.scalecube.metrics.CounterTags.WRITE_EPOCH_ID;
+import static io.scalecube.metrics.CounterVisibility.PRIVATE;
 import static io.scalecube.metrics.CountersRegistry.Context.COUNTERS_FILE;
 import static org.agrona.IoUtil.mapExistingFile;
 
@@ -9,7 +12,10 @@ import java.io.File;
 import java.nio.MappedByteBuffer;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.List;
 import org.agrona.BufferUtil;
+import org.agrona.collections.Int2ObjectHashMap;
+import org.agrona.collections.IntHashSet;
 import org.agrona.concurrent.Agent;
 import org.agrona.concurrent.AgentTerminationException;
 import org.agrona.concurrent.EpochClock;
@@ -43,6 +49,7 @@ public class CountersReaderAgent implements Agent {
   private File countersFile;
   private MappedByteBuffer countersByteBuffer;
   private final UnsafeBuffer headerBuffer = new UnsafeBuffer();
+  private final KeyCodec keyCodec = new KeyCodec();
   private long countersStartTimestamp = -1;
   private long countersPid = -1;
   private int countersValuesBufferLength = -1;
@@ -113,7 +120,7 @@ public class CountersReaderAgent implements Agent {
 
     if (!isActive(countersFile)) {
       state(State.CLEANUP);
-      return 0;
+      return 1;
     }
 
     countersByteBuffer = mapExistingFile(countersFile, COUNTERS_FILE);
@@ -124,7 +131,7 @@ public class CountersReaderAgent implements Agent {
 
     if (countersValuesBufferLength <= 0) {
       state(State.CLEANUP);
-      return 0;
+      return 1;
     }
 
     countersReader =
@@ -147,20 +154,91 @@ public class CountersReaderAgent implements Agent {
     if (!isActive(countersFile)) {
       state(State.CLEANUP);
       LOGGER.warn("[{}] {} is not active, proceed to cleanup", roleName(), countersFile);
-      return 0;
+      return 1;
     }
 
-    final var timestamp = epochClock.time();
-    final var counterDescriptors = new ArrayList<CounterDescriptor>();
+    countersHandler.accept(epochClock.time(), snapshotCounters());
+    return 0;
+  }
+
+  private List<CounterDescriptor> snapshotCounters() {
+    final var snapshot = new ArrayList<CounterDescriptor>();
+    final var writeGroups = new Int2ObjectHashMap<IntHashSet>();
+
     countersReader.forEach(
         (counterId, typeId, keyBuffer, label) -> {
-          final var counterValue = countersReader.getCounterValue(counterId);
-          counterDescriptors.add(
-              new CounterDescriptor(counterId, typeId, counterValue, keyBuffer, label));
-        });
-    countersHandler.accept(timestamp, counterDescriptors);
+          final var value = countersReader.getCounterValue(counterId);
+          final var counter = new CounterDescriptor(counterId, typeId, value, keyBuffer, label);
+          final var key = keyCodec.decodeKey(keyBuffer, 0);
 
-    return 0;
+          if (hasWriteEpochId(key)) {
+            writeGroups.computeIfAbsent(writeEpochId(key), k -> new IntHashSet()).add(counterId);
+          } else if (!hasPrivateVisibility(key)) {
+            snapshot.add(counter);
+          }
+        });
+
+    trySnapshotWriteGroups(snapshot, writeGroups);
+    return snapshot;
+  }
+
+  private void trySnapshotWriteGroups(
+      List<CounterDescriptor> snapshot, Int2ObjectHashMap<IntHashSet> writeGroups) {
+    writeGroups.forEachInt(
+        (epochId, counterIds) -> {
+          final var epochCounter = CounterDescriptor.getCounter(countersReader, epochId);
+          if (epochCounter != null) {
+            for (int attempt = 0; attempt < 16; attempt++) {
+              final var epochBefore = countersReader.getCounterValue(epochId);
+
+              // odd => writer in progress, retry
+              if ((epochBefore & 1) != 0) {
+                Thread.onSpinWait();
+                continue;
+              }
+
+              // try read counters, skip if not present
+              final var counters = readCounters(counterIds);
+              if (counters == null) {
+                break;
+              }
+
+              final long epochAfter = countersReader.getCounterValue(epochId);
+              if (epochAfter != epochBefore) {
+                Thread.onSpinWait();
+                continue;
+              }
+
+              snapshot.addAll(counters);
+              break;
+            }
+          }
+        });
+  }
+
+  private List<CounterDescriptor> readCounters(IntHashSet counterIds) {
+    final var list = new ArrayList<CounterDescriptor>();
+    for (var counterId : counterIds) {
+      final var counter = CounterDescriptor.getCounter(countersReader, counterId);
+      if (counter != null) {
+        list.add(counter);
+      } else {
+        return null;
+      }
+    }
+    return list;
+  }
+
+  private static boolean hasWriteEpochId(Key key) {
+    return writeEpochId(key) != null;
+  }
+
+  private static Integer writeEpochId(Key key) {
+    return key.intValue(WRITE_EPOCH_ID);
+  }
+
+  private static boolean hasPrivateVisibility(Key key) {
+    return key.enumValue(COUNTER_VISIBILITY, CounterVisibility::get) == PRIVATE;
   }
 
   private boolean isActive(File countersFile) {

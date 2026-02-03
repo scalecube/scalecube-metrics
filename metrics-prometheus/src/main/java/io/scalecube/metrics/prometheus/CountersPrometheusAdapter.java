@@ -51,17 +51,14 @@ public class CountersPrometheusAdapter implements CountersHandler, PrometheusWri
 
     for (var descriptor : counterDescriptors) {
       final var key = keyCodec.decodeKey(descriptor.keyBuffer(), 0);
-      final var visibility = key.stringValue("visibility");
-      if (!"private".equals(visibility)) {
-        final var name = descriptor.label() != null ? descriptor.label() : key.stringValue("name");
-        if (name != null) {
-          writer
-              .append(sanitizeName(name))
-              .append(formatLabels(toTags(key)))
-              .append(" ")
-              .append(String.valueOf(descriptor.value()))
-              .append("\n");
-        }
+      final var name = descriptor.label() != null ? descriptor.label() : key.stringValue("name");
+      if (name != null) {
+        writer
+            .append(sanitizeName(name))
+            .append(formatLabels(toTags(key)))
+            .append(" ")
+            .append(String.valueOf(descriptor.value()))
+            .append("\n");
       }
     }
   }
