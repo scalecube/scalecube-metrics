@@ -204,7 +204,7 @@ public class CountersReaderAgent implements Agent {
               }
 
               final long epochAfter = countersReader.getCounterValue(epochId);
-              if (epochBefore != epochAfter) {
+              if (epochAfter != epochBefore) {
                 Thread.onSpinWait();
                 continue;
               }
