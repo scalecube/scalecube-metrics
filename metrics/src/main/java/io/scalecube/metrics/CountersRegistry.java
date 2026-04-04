@@ -170,14 +170,10 @@ public class CountersRegistry implements AutoCloseable {
         throw new IllegalArgumentException("countersValuesBufferLength must be power of 2");
       }
 
-      final var countersMetaDataBufferLength =
-          LayoutDescriptor.countersMetaDataBufferLength(countersValuesBufferLength);
-      final var countersFileLength =
-          LayoutDescriptor.HEADER_LENGTH
-              + countersMetaDataBufferLength
-              + countersValuesBufferLength;
-
-      mappedByteBuffer = mapNewFile(new File(countersDir, COUNTERS_FILE), countersFileLength);
+      mappedByteBuffer =
+          mapNewFile(
+              new File(countersDir, COUNTERS_FILE),
+              LayoutDescriptor.countersFileLength(countersValuesBufferLength));
 
       final var headerBuffer = LayoutDescriptor.createHeaderBuffer(mappedByteBuffer);
       final var startTimestamp = ManagementFactory.getRuntimeMXBean().getStartTime();
@@ -273,6 +269,12 @@ public class CountersRegistry implements AutoCloseable {
     public static final int COUNTERS_VALUES_BUFFER_LENGTH_OFFSET = 16;
 
     private LayoutDescriptor() {}
+
+    public static int countersFileLength(int countersValuesBufferLength) {
+      return LayoutDescriptor.HEADER_LENGTH
+          + LayoutDescriptor.countersMetaDataBufferLength(countersValuesBufferLength)
+          + countersValuesBufferLength;
+    }
 
     public static int countersMetaDataBufferLength(int countersValuesBufferLength) {
       return countersValuesBufferLength * (METADATA_LENGTH / COUNTER_LENGTH);

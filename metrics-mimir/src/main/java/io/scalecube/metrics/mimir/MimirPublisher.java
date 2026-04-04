@@ -11,10 +11,10 @@ import org.agrona.CloseHelper;
 import org.agrona.ErrorHandler;
 import org.agrona.concurrent.AgentInvoker;
 import org.agrona.concurrent.AgentRunner;
-import org.agrona.concurrent.BackoffIdleStrategy;
 import org.agrona.concurrent.EpochClock;
 import org.agrona.concurrent.IdleStrategy;
 import org.agrona.concurrent.ManyToOneConcurrentArrayQueue;
+import org.agrona.concurrent.SleepingMillisIdleStrategy;
 import org.agrona.concurrent.SystemEpochClock;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -150,11 +150,11 @@ public class MimirPublisher implements AutoCloseable {
       }
 
       if (errorHandler == null) {
-        errorHandler = ex -> LOGGER.error("Exception occurred: ", ex);
+        errorHandler = ex -> LOGGER.error("Exception occurred", ex);
       }
 
       if (idleStrategy == null) {
-        idleStrategy = new BackoffIdleStrategy();
+        idleStrategy = new SleepingMillisIdleStrategy(100);
       }
 
       Objects.requireNonNull(url, "url");

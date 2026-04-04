@@ -6,7 +6,7 @@ import static org.agrona.IoUtil.delete;
 import static org.agrona.IoUtil.ensureDirectoryExists;
 import static org.agrona.IoUtil.mapExistingFile;
 import static org.agrona.IoUtil.mapNewFile;
-import static org.agrona.concurrent.ringbuffer.RingBufferDescriptor.TRAILER_LENGTH;
+import static org.agrona.concurrent.broadcast.BroadcastBufferDescriptor.TRAILER_LENGTH;
 
 import java.io.File;
 import java.io.IOException;
@@ -30,24 +30,19 @@ import org.agrona.LangUtil;
 import org.agrona.SystemUtil;
 import org.agrona.concurrent.AgentInvoker;
 import org.agrona.concurrent.AgentRunner;
-import org.agrona.concurrent.BackoffIdleStrategy;
 import org.agrona.concurrent.CachedEpochClock;
 import org.agrona.concurrent.EpochClock;
 import org.agrona.concurrent.IdleStrategy;
+import org.agrona.concurrent.SleepingMillisIdleStrategy;
 import org.agrona.concurrent.SystemEpochClock;
 import org.agrona.concurrent.UnsafeBuffer;
-import org.agrona.concurrent.ringbuffer.ManyToOneRingBuffer;
+import org.agrona.concurrent.broadcast.BroadcastTransmitter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
  * Entry point for allocating and aggregating metrics (histograms, tps values). Responsible for
- * publishing aggregated metrics data to the many-to-one ring-buffer for further processing. Can run
- * in multiple instances, but metrics aggregation occurs only per concrete instance.
- *
- * @see HistogramMetric
- * @see TpsMetric
- * @see MetricsTransmitter
+ * publishing aggregated metrics data to the ring-buffer for further processing.
  */
 public class MetricsRecorder implements AutoCloseable {
 
@@ -69,7 +64,7 @@ public class MetricsRecorder implements AutoCloseable {
               metricsQueue,
               context.epochClock(),
               context.cachedEpochClock(),
-              context.metricsPublication());
+              context.metricsTransmitter());
 
       if (context.useAgentInvoker()) {
         agentRunner = null;
@@ -188,7 +183,7 @@ public class MetricsRecorder implements AutoCloseable {
 
     public static final String METRICS_FILE = "metrics.dat";
     public static final String DEFAULT_METRICS_DIR_NAME;
-    public static final int DEFAULT_METRICS_BUFFER_LENGTH = 32 * 1024 * 1024;
+    public static final int DEFAULT_METRICS_BUFFER_LENGTH = 8 * 1024 * 1024;
 
     static {
       String baseDirName = null;
@@ -222,7 +217,7 @@ public class MetricsRecorder implements AutoCloseable {
     private CachedEpochClock cachedEpochClock;
     private int metricsBufferLength = Integer.getInteger(METRICS_BUFFER_LENGTH_PROP_NAME, 0);
     private MappedByteBuffer metricsByteBuffer;
-    private ManyToOneRingBuffer metricsBuffer;
+    private BroadcastTransmitter metricsTransmitter;
     private boolean useAgentInvoker;
     private ErrorHandler errorHandler;
     private IdleStrategy idleStrategy;
@@ -253,11 +248,11 @@ public class MetricsRecorder implements AutoCloseable {
       }
 
       if (errorHandler == null) {
-        errorHandler = ex -> LOGGER.error("Exception occurred: ", ex);
+        errorHandler = ex -> LOGGER.error("Exception occurred", ex);
       }
 
       if (idleStrategy == null) {
-        idleStrategy = new BackoffIdleStrategy();
+        idleStrategy = new SleepingMillisIdleStrategy(100);
       }
     }
 
@@ -275,24 +270,7 @@ public class MetricsRecorder implements AutoCloseable {
       }
 
       if (metricsDir.isDirectory()) {
-        final var file = new File(metricsDir, METRICS_FILE);
-        if (file.exists()) {
-          final var mappedByteBuffer = mapExistingFile(file, METRICS_FILE);
-          try {
-            if (!LayoutDescriptor.isMetricsHeaderLengthSufficient(mappedByteBuffer.capacity())) {
-              delete(metricsDir, false);
-            } else {
-              final var headerBuffer = LayoutDescriptor.createHeaderBuffer(mappedByteBuffer);
-              final var startTimestamp = ManagementFactory.getRuntimeMXBean().getStartTime();
-              final var pid = ManagementFactory.getRuntimeMXBean().getPid();
-              if (!LayoutDescriptor.isMetricsActive(headerBuffer, startTimestamp, pid)) {
-                delete(metricsDir, false);
-              }
-            }
-          } finally {
-            BufferUtil.free(mappedByteBuffer);
-          }
-        }
+        delete(metricsDir, false);
       }
 
       ensureDirectoryExists(metricsDir, "metrics");
@@ -316,22 +294,20 @@ public class MetricsRecorder implements AutoCloseable {
       final var bufferLength = metricsBufferLength + TRAILER_LENGTH;
       final var totalLength = headerLength + bufferLength;
 
-      if (!file.exists()) {
-        final var mappedByteBuffer = mapNewFile(file, totalLength);
-        try {
-          final var headerBuffer = LayoutDescriptor.createHeaderBuffer(mappedByteBuffer);
-          final var startTimestamp = ManagementFactory.getRuntimeMXBean().getStartTime();
-          final var pid = ManagementFactory.getRuntimeMXBean().getPid();
-          LayoutDescriptor.fillHeaderBuffer(headerBuffer, startTimestamp, pid, bufferLength);
-          mappedByteBuffer.force();
-        } finally {
-          BufferUtil.free(mappedByteBuffer);
-        }
+      final var mappedByteBuffer = mapNewFile(file, totalLength);
+      try {
+        final var headerBuffer = LayoutDescriptor.createHeaderBuffer(mappedByteBuffer);
+        final var startTimestamp = ManagementFactory.getRuntimeMXBean().getStartTime();
+        final var pid = ManagementFactory.getRuntimeMXBean().getPid();
+        LayoutDescriptor.fillHeaderBuffer(headerBuffer, startTimestamp, pid, bufferLength);
+        mappedByteBuffer.force();
+      } finally {
+        BufferUtil.free(mappedByteBuffer);
       }
 
       metricsByteBuffer = mapExistingFile(file, METRICS_FILE);
-      metricsBuffer =
-          new ManyToOneRingBuffer(new UnsafeBuffer(metricsByteBuffer, headerLength, bufferLength));
+      metricsTransmitter =
+          new BroadcastTransmitter(new UnsafeBuffer(metricsByteBuffer, headerLength, bufferLength));
     }
 
     public File metricsDir() {
@@ -441,8 +417,8 @@ public class MetricsRecorder implements AutoCloseable {
       return idleStrategy;
     }
 
-    MetricsPublication metricsPublication() {
-      return new MetricsPublication(metricsBuffer);
+    BroadcastTransmitter metricsTransmitter() {
+      return metricsTransmitter;
     }
 
     public static String generateMetricsDirectoryName() {
@@ -502,28 +478,6 @@ public class MetricsRecorder implements AutoCloseable {
       headerBuffer.putLong(START_TIMESTAMP_OFFSET, startTimestamp);
       headerBuffer.putLong(PID_OFFSET, pid);
       headerBuffer.putInt(METRICS_BUFFER_LENGTH_OFFSET, metricsBufferLength);
-    }
-  }
-
-  static class MetricsPublication {
-
-    private final ManyToOneRingBuffer metricsBuffer;
-
-    MetricsPublication(ManyToOneRingBuffer metricsBuffer) {
-      this.metricsBuffer = metricsBuffer;
-    }
-
-    void publish(DirectBuffer buffer, int offset, int length) {
-      final var index = metricsBuffer.tryClaim(1, length);
-      if (index > 0) {
-        try {
-          metricsBuffer.buffer().putBytes(index, buffer, offset, length);
-          metricsBuffer.commit(index);
-        } catch (Exception ex) {
-          metricsBuffer.abort(index);
-          LangUtil.rethrowUnchecked(ex);
-        }
-      }
     }
   }
 }
