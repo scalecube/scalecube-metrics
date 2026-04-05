@@ -1,4 +1,4 @@
-# ScaleCube KPI/Telemetry library
+# scalecube-metrics
 
 High-performance KPI and telemetry library for Java, designed for ultra-low-latency and precise
 metrics. Built on Agrona Counters and HdrHistograms, it supports both real-time monitoring and
