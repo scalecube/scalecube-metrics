@@ -6,7 +6,6 @@ import io.scalecube.metrics.KeyCodec;
 import io.scalecube.metrics.MetricsHandler;
 import io.scalecube.metrics.MetricsReaderAgent;
 import io.scalecube.metrics.MetricsRecorder;
-import io.scalecube.metrics.MetricsTransmitter;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -68,7 +67,6 @@ public class MimirAllInOneHistogram {
     System.out.println("Grafana is available at: " + grafanaUrl);
 
     final var metricsRecorder = MetricsRecorder.launch();
-    final var metricsTransmitter = MetricsTransmitter.launch();
 
     AgentRunner.startOnThread(
         new AgentRunner(
@@ -77,7 +75,8 @@ public class MimirAllInOneHistogram {
             null,
             new MetricsReaderAgent(
                 "MetricsReaderAgent",
-                metricsTransmitter.context().broadcastBuffer(),
+                metricsRecorder.context().metricsDir(),
+                true,
                 SystemEpochClock.INSTANCE,
                 Duration.ofSeconds(3),
                 new MimirHistogramHandler(pushUrl))));

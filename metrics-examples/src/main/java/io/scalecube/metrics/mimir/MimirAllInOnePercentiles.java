@@ -4,7 +4,6 @@ import static org.testcontainers.utility.MountableFile.forClasspathResource;
 
 import io.scalecube.metrics.MetricsReaderAgent;
 import io.scalecube.metrics.MetricsRecorder;
-import io.scalecube.metrics.MetricsTransmitter;
 import java.time.Duration;
 import org.agrona.concurrent.AgentRunner;
 import org.agrona.concurrent.BackoffIdleStrategy;
@@ -49,7 +48,6 @@ public class MimirAllInOnePercentiles {
     System.out.println("Grafana is available at: " + grafanaUrl);
 
     final var metricsRecorder = MetricsRecorder.launch();
-    final var metricsTransmitter = MetricsTransmitter.launch();
     final var mimirPublisher = MimirPublisher.launch(new MimirPublisher.Context().url(pushUrl));
 
     // Metrics
@@ -61,7 +59,8 @@ public class MimirAllInOnePercentiles {
             null,
             new MetricsReaderAgent(
                 "MetricsReaderAgent",
-                metricsTransmitter.context().broadcastBuffer(),
+                metricsRecorder.context().metricsDir(),
+                true,
                 SystemEpochClock.INSTANCE,
                 Duration.ofSeconds(3),
                 new MetricsMimirHandler(null, mimirPublisher.proxy()))));

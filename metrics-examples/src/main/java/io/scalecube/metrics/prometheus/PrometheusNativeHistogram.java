@@ -8,7 +8,6 @@ import com.sun.net.httpserver.HttpServer;
 import io.scalecube.metrics.MetricsHandler;
 import io.scalecube.metrics.MetricsReaderAgent;
 import io.scalecube.metrics.MetricsRecorder;
-import io.scalecube.metrics.MetricsTransmitter;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
@@ -69,7 +68,6 @@ public class PrometheusNativeHistogram {
     System.out.println(Instant.now() + " | Server started on " + socketAddress);
 
     final var metricsRecorder = MetricsRecorder.launch();
-    final var metricsTransmitter = MetricsTransmitter.launch();
 
     AgentRunner.startOnThread(
         new AgentRunner(
@@ -78,7 +76,8 @@ public class PrometheusNativeHistogram {
             null,
             new MetricsReaderAgent(
                 "MetricsReaderAgent",
-                metricsTransmitter.context().broadcastBuffer(),
+                metricsRecorder.context().metricsDir(),
+                true,
                 SystemEpochClock.INSTANCE,
                 Duration.ofSeconds(3),
                 metricsHandlerAdapter)));
@@ -88,6 +87,7 @@ public class PrometheusNativeHistogram {
     final var highestTrackableValue = (long) 1e9;
     final var conversionFactor = 1e-3;
     final var resolutionMs = 1000;
+
     final var latencyMetric =
         metricsRecorder.newHistogram(
             keyFlyweight -> keyFlyweight.tagsCount(1).stringValue("name", "hft_latency"),
