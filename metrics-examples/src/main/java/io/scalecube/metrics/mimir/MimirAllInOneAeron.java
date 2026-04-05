@@ -30,7 +30,6 @@ import io.scalecube.metrics.CountersRegistry;
 import io.scalecube.metrics.HistogramMetric;
 import io.scalecube.metrics.MetricsReaderAgent;
 import io.scalecube.metrics.MetricsRecorder;
-import io.scalecube.metrics.MetricsTransmitter;
 import io.scalecube.metrics.TpsMetric;
 import io.scalecube.metrics.aeron.CncCountersReaderAgent;
 import java.time.Duration;
@@ -82,8 +81,6 @@ public class MimirAllInOneAeron {
     System.out.println("Grafana is available at: " + grafanaUrl);
 
     final var metricsRecorder = MetricsRecorder.launch();
-    final var metricsTransmitter = MetricsTransmitter.launch();
-
     final var countersRegistry = CountersRegistry.create();
     final var countersManager = countersRegistry.countersManager();
     final var sessionCounter = countersManager.newCounter("session_count");
@@ -159,7 +156,8 @@ public class MimirAllInOneAeron {
                 new CountersMimirHandler(null, mimirPublisher.proxy())),
             new MetricsReaderAgent(
                 "MetricsReaderAgent",
-                metricsTransmitter.context().broadcastBuffer(),
+                metricsRecorder.context().metricsDir(),
+                true,
                 SystemEpochClock.INSTANCE,
                 Duration.ofSeconds(3),
                 new MetricsMimirHandler(null, mimirPublisher.proxy())));

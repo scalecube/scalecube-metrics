@@ -30,7 +30,6 @@ import io.scalecube.metrics.CountersRegistry;
 import io.scalecube.metrics.HistogramMetric;
 import io.scalecube.metrics.MetricsReaderAgent;
 import io.scalecube.metrics.MetricsRecorder;
-import io.scalecube.metrics.MetricsTransmitter;
 import io.scalecube.metrics.TpsMetric;
 import io.scalecube.metrics.aeron.CncCountersReaderAgent;
 import java.io.IOException;
@@ -80,7 +79,6 @@ public class PrometheusAllInOneAeron {
     System.out.println("Grafana: " + grafanaUrl);
 
     final var metricsRecorder = MetricsRecorder.launch();
-    final var metricsTransmitter = MetricsTransmitter.launch();
 
     final var highestTrackableValue = (long) 1e9;
     final var conversionFactor = 1e-3;
@@ -185,7 +183,8 @@ public class PrometheusAllInOneAeron {
                 cncCountersAdapter),
             new MetricsReaderAgent(
                 "MetricsReaderAgent",
-                metricsTransmitter.context().broadcastBuffer(),
+                metricsRecorder.context().metricsDir(),
+                true,
                 SystemEpochClock.INSTANCE,
                 Duration.ofSeconds(3),
                 metricsAdapter));

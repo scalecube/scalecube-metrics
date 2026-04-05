@@ -1,6 +1,5 @@
 package io.scalecube.metrics;
 
-import io.scalecube.metrics.MetricsRecorder.MetricsPublication;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -13,6 +12,7 @@ import org.agrona.collections.Object2ObjectHashMap;
 import org.agrona.concurrent.Agent;
 import org.agrona.concurrent.CachedEpochClock;
 import org.agrona.concurrent.EpochClock;
+import org.agrona.concurrent.broadcast.BroadcastTransmitter;
 
 class MetricsRecorderAgent implements Agent {
 
@@ -24,7 +24,7 @@ class MetricsRecorderAgent implements Agent {
   private final Queue<Object> queue;
   private final EpochClock epochClock;
   private final CachedEpochClock cachedEpochClock;
-  private final MetricsPublication metricsPublication;
+  private final BroadcastTransmitter metricsTransmitter;
 
   private final MetricsEncoder metricsEncoder = new MetricsEncoder();
   private final Map<DirectBuffer, List<Object>> metrics = new Object2ObjectHashMap<>();
@@ -36,11 +36,11 @@ class MetricsRecorderAgent implements Agent {
       Queue<Object> queue,
       EpochClock epochClock,
       CachedEpochClock cachedEpochClock,
-      MetricsPublication metricsPublication) {
+      BroadcastTransmitter metricsTransmitter) {
     this.queue = queue;
     this.epochClock = epochClock;
     this.cachedEpochClock = cachedEpochClock;
-    this.metricsPublication = metricsPublication;
+    this.metricsTransmitter = metricsTransmitter;
     timerWheel =
         new DeadlineTimerWheel(
             TimeUnit.MILLISECONDS, 0, TIMER_TICK_RESOLUTION, TIMER_TICKS_PER_WHEEL);
@@ -83,7 +83,7 @@ class MetricsRecorderAgent implements Agent {
               metric.conversionFactor(),
               metric.resolutionMs(),
               metricsEncoder,
-              metricsPublication));
+              metricsTransmitter));
       schedule(keyBuffer, metric.resolutionMs());
     }
   }
@@ -94,7 +94,7 @@ class MetricsRecorderAgent implements Agent {
     list.add(metric);
 
     if (!aggregates.containsKey(keyBuffer)) {
-      aggregates.put(keyBuffer, new TpsAggregate(keyBuffer, metricsEncoder, metricsPublication));
+      aggregates.put(keyBuffer, new TpsAggregate(keyBuffer, metricsEncoder, metricsTransmitter));
       schedule(keyBuffer, TPS_RESOLUTION);
     }
   }

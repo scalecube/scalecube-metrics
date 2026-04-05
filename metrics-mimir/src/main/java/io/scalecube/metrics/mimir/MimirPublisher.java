@@ -150,7 +150,7 @@ public class MimirPublisher implements AutoCloseable {
       }
 
       if (errorHandler == null) {
-        errorHandler = ex -> LOGGER.error("Exception occurred: ", ex);
+        errorHandler = ex -> LOGGER.error("Exception occurred", ex);
       }
 
       if (idleStrategy == null) {
