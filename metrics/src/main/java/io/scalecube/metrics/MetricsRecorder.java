@@ -30,10 +30,10 @@ import org.agrona.LangUtil;
 import org.agrona.SystemUtil;
 import org.agrona.concurrent.AgentInvoker;
 import org.agrona.concurrent.AgentRunner;
+import org.agrona.concurrent.BackoffIdleStrategy;
 import org.agrona.concurrent.CachedEpochClock;
 import org.agrona.concurrent.EpochClock;
 import org.agrona.concurrent.IdleStrategy;
-import org.agrona.concurrent.SleepingMillisIdleStrategy;
 import org.agrona.concurrent.SystemEpochClock;
 import org.agrona.concurrent.UnsafeBuffer;
 import org.agrona.concurrent.broadcast.BroadcastTransmitter;
@@ -252,7 +252,7 @@ public class MetricsRecorder implements AutoCloseable {
       }
 
       if (idleStrategy == null) {
-        idleStrategy = new SleepingMillisIdleStrategy(100);
+        idleStrategy = new BackoffIdleStrategy();
       }
     }
 
@@ -417,7 +417,7 @@ public class MetricsRecorder implements AutoCloseable {
       return idleStrategy;
     }
 
-    BroadcastTransmitter metricsTransmitter() {
+    private BroadcastTransmitter metricsTransmitter() {
       return metricsTransmitter;
     }
 
