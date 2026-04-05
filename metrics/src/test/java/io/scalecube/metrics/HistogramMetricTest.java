@@ -4,7 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import io.scalecube.metrics.MetricsTransmitter.Context;
+import java.time.Duration;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 import org.HdrHistogram.Histogram;
@@ -26,26 +26,36 @@ class HistogramMetricTest {
   private final CachedEpochClock epochClock = new CachedEpochClock();
   private final MetricsHandlerImpl metricsHandler = new MetricsHandlerImpl();
   private MetricsRecorder metricsRecorder;
-  private MetricsTransmitter metricsTransmitter;
-  private MetricsReader metricsReader;
+  private MetricsReaderAgent metricsReaderAgent;
 
   @BeforeEach
   void beforeEach() {
     metricsRecorder =
         MetricsRecorder.launch(
             new MetricsRecorder.Context().useAgentInvoker(true).epochClock(epochClock));
-    metricsRecorder.agentInvoker().invoke(); // init delays
+    metricsReaderAgent =
+        new MetricsReaderAgent(
+            "reader",
+            metricsRecorder.context().metricsDir(),
+            true,
+            epochClock,
+            Duration.ofSeconds(1),
+            metricsHandler);
 
-    metricsTransmitter =
-        MetricsTransmitter.launch(new Context().useAgentInvoker(true).epochClock(epochClock));
-    metricsTransmitter.agentInvoker().invoke(); // kick-off
+    // kick-off
+    metricsRecorder.agentInvoker().invoke();
 
-    metricsReader = new MetricsReader(metricsTransmitter.context().broadcastBuffer());
+    // kick-off
+    metricsReaderAgent.onStart();
+    metricsReaderAgent.doWork();
   }
 
   @AfterEach
   void afterEach() {
-    CloseHelper.quietCloseAll(metricsReader, metricsTransmitter, metricsRecorder);
+    CloseHelper.quietCloseAll(metricsRecorder);
+    if (metricsReaderAgent != null) {
+      metricsReaderAgent.onClose();
+    }
   }
 
   @Nested
@@ -74,9 +84,8 @@ class HistogramMetricTest {
 
       advanceClock(RESOLUTION);
       metricsRecorder.agentInvoker().invoke();
-      metricsTransmitter.agentInvoker().invoke();
+      metricsReaderAgent.doWork();
 
-      metricsReader.read(metricsHandler.reset());
       metricsHandler.assertHasRead();
       metricsHandler.assertName(name);
       assertEquals(4, metricsHandler.accumulated.getTotalCount(), "accumulated.totalCount");
@@ -108,9 +117,8 @@ class HistogramMetricTest {
 
         advanceClock(RESOLUTION);
         metricsRecorder.agentInvoker().invoke();
-        metricsTransmitter.agentInvoker().invoke();
+        metricsReaderAgent.doWork();
 
-        metricsReader.read(metricsHandler.reset());
         metricsHandler.assertHasRead();
         metricsHandler.assertName(name);
         assertEquals(i * 4, metricsHandler.accumulated.getTotalCount(), "accumulated.totalCount");
@@ -158,9 +166,8 @@ class HistogramMetricTest {
 
       advanceClock(RESOLUTION);
       metricsRecorder.agentInvoker().invoke();
-      metricsTransmitter.agentInvoker().invoke();
+      metricsReaderAgent.doWork();
 
-      metricsReader.read(metricsHandler.reset());
       metricsHandler.assertHasRead();
       metricsHandler.assertName(name);
       assertEquals(8, metricsHandler.accumulated.getTotalCount(), "accumulated.totalCount");
@@ -213,9 +220,8 @@ class HistogramMetricTest {
 
       advanceClock(RESOLUTION);
       metricsRecorder.agentInvoker().invoke();
-      metricsTransmitter.agentInvoker().invoke();
+      metricsReaderAgent.doWork();
 
-      metricsReader.read(metricsHandler.reset());
       metricsHandler.assertHasRead();
       metricsHandler.assertName(name);
       assertEquals(8, metricsHandler.accumulated.getTotalCount(), "accumulated.totalCount");
@@ -265,9 +271,8 @@ class HistogramMetricTest {
 
         advanceClock(RESOLUTION);
         metricsRecorder.agentInvoker().invoke();
-        metricsTransmitter.agentInvoker().invoke();
+        metricsReaderAgent.doWork();
 
-        metricsReader.read(metricsHandler.reset());
         metricsHandler.assertHasRead();
         metricsHandler.assertName(name);
         assertEquals(i * 8, metricsHandler.accumulated.getTotalCount(), "accumulated.totalCount");
@@ -305,14 +310,6 @@ class HistogramMetricTest {
       this.distinct = distinct;
       this.highestTrackableValue = highestTrackableValue;
       this.conversionFactor = conversionFactor;
-    }
-
-    MetricsHandlerImpl reset() {
-      timestamp = 0;
-      key = null;
-      accumulated = null;
-      distinct = null;
-      return this;
     }
 
     void assertHasRead() {
