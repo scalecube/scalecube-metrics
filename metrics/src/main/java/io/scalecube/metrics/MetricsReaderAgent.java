@@ -145,6 +145,10 @@ public class MetricsReaderAgent implements MessageHandler, Agent {
             new BroadcastReceiver(
                 new UnsafeBuffer(metricsByteBuffer, headerLength, metricsBufferLength)),
             new UnsafeBuffer(scratchBuffer));
+    broadcastReceiver.receive(
+        (msgTypeId, buffer, index, length) -> {
+          // no-op
+        });
 
     state(State.RUNNING);
     LOGGER.info("[{}] Initialized, now running", roleName());
