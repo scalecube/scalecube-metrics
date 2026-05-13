@@ -12,6 +12,7 @@ import io.scalecube.metrics.sbe.TpsDecoder;
 import java.io.File;
 import java.nio.ByteBuffer;
 import java.nio.MappedByteBuffer;
+import java.nio.channels.FileChannel.MapMode;
 import java.time.Duration;
 import org.agrona.BufferUtil;
 import org.agrona.MutableDirectBuffer;
@@ -127,7 +128,7 @@ public class MetricsReaderAgent implements MessageHandler, Agent {
       return 0;
     }
 
-    metricsByteBuffer = mapExistingFile(metricsFile, METRICS_FILE);
+    metricsByteBuffer = mapExistingFile(metricsFile, MapMode.READ_ONLY, METRICS_FILE);
     final var headerLength = LayoutDescriptor.HEADER_LENGTH;
     headerBuffer.wrap(metricsByteBuffer, 0, headerLength);
     metricsStartTimestamp = LayoutDescriptor.startTimestamp(headerBuffer);
@@ -232,7 +233,7 @@ public class MetricsReaderAgent implements MessageHandler, Agent {
       return false;
     }
 
-    final var buffer = mapExistingFile(metricsFile, METRICS_FILE);
+    final var buffer = mapExistingFile(metricsFile, MapMode.READ_ONLY, METRICS_FILE);
     try {
       if (!LayoutDescriptor.isMetricsHeaderLengthSufficient(buffer.capacity())) {
         LOGGER.warn("[{}] {} has not sufficient length", roleName(), metricsFile);

@@ -10,6 +10,7 @@ import io.scalecube.metrics.CountersRegistry.Context;
 import io.scalecube.metrics.CountersRegistry.LayoutDescriptor;
 import java.io.File;
 import java.nio.MappedByteBuffer;
+import java.nio.channels.FileChannel.MapMode;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -123,7 +124,7 @@ public class CountersReaderAgent implements Agent {
       return 1;
     }
 
-    countersByteBuffer = mapExistingFile(countersFile, COUNTERS_FILE);
+    countersByteBuffer = mapExistingFile(countersFile, MapMode.READ_ONLY, COUNTERS_FILE);
     headerBuffer.wrap(countersByteBuffer, 0, LayoutDescriptor.HEADER_LENGTH);
     countersStartTimestamp = LayoutDescriptor.startTimestamp(headerBuffer);
     countersPid = LayoutDescriptor.pid(headerBuffer);
@@ -249,7 +250,7 @@ public class CountersReaderAgent implements Agent {
       return false;
     }
 
-    final var buffer = mapExistingFile(countersFile, COUNTERS_FILE);
+    final var buffer = mapExistingFile(countersFile, MapMode.READ_ONLY, COUNTERS_FILE);
     try {
       if (!LayoutDescriptor.isCountersHeaderLengthSufficient(buffer.capacity())) {
         LOGGER.warn("[{}] {} has not sufficient length", roleName(), countersFile);
