@@ -49,7 +49,8 @@ class CountersReaderAgentTest {
             true,
             epochClock,
             READ_INTERVAL,
-            countersHandler);
+            countersHandler,
+            true);
     agent.onStart();
   }
 

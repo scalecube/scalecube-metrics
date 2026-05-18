@@ -31,6 +31,7 @@ public class CountersReaderAgent implements Agent {
   private final Delay readInterval;
   private File countersFile;
   private final CountersSnapshot countersSnapshot;
+  private final boolean keepOpen;
   private State state = State.CLOSED;
 
   /**
@@ -42,6 +43,8 @@ public class CountersReaderAgent implements Agent {
    * @param epochClock epochClock
    * @param readInterval interval at which to read counters
    * @param countersHandler callback handler to process counters
+   * @param keepOpen set to true to keep the mmaped file open the whole time, false if it should be
+   *     closed immediately after reading
    */
   public CountersReaderAgent(
       String roleName,
@@ -49,13 +52,15 @@ public class CountersReaderAgent implements Agent {
       boolean warnIfCountersNotExists,
       EpochClock epochClock,
       Duration readInterval,
-      CountersHandler countersHandler) {
+      CountersHandler countersHandler,
+      boolean keepOpen) {
     this.roleName = roleName;
     this.epochClock = epochClock;
     this.countersHandler = countersHandler;
     this.readInterval = new Delay(epochClock, readInterval.toMillis());
     this.countersSnapshot =
         new CountersSnapshot(roleName, countersDir, warnIfCountersNotExists, false);
+    this.keepOpen = keepOpen;
   }
 
   @Override
@@ -76,7 +81,13 @@ public class CountersReaderAgent implements Agent {
     try {
       return switch (state) {
         case INIT -> init();
-        case RUNNING -> running();
+        case RUNNING -> {
+          final var val = running();
+          if (!keepOpen) {
+            cleanup();
+          }
+          yield val;
+        }
         case CLEANUP -> cleanup();
         default -> throw new AgentTerminationException("Unknown state: " + state);
       };
