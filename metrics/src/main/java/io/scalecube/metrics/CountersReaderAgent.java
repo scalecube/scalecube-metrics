@@ -15,7 +15,6 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import org.agrona.BufferUtil;
-import org.agrona.DirectBuffer;
 import org.agrona.collections.Int2ObjectHashMap;
 import org.agrona.collections.IntHashSet;
 import org.agrona.concurrent.Agent;
@@ -199,12 +198,8 @@ public class CountersReaderAgent implements Agent {
     countersReader.forEach(
         (counterId, typeId, keyBuffer, label) -> {
           final var value = countersReader.getCounterValue(counterId);
-          DirectBuffer keyBufferCopy = keyBuffer;
-          if (!keepOpen) {
-            final var tmpBuffer = new UnsafeBuffer(new byte[keyBuffer.capacity()]);
-            keyBuffer.getBytes(0, tmpBuffer, 0, tmpBuffer.capacity());
-            keyBufferCopy = tmpBuffer;
-          }
+          final var keyBufferCopy = new UnsafeBuffer(new byte[keyBuffer.capacity()]);
+          keyBuffer.getBytes(0, keyBufferCopy, 0, keyBufferCopy.capacity());
           final var counter = new CounterDescriptor(counterId, typeId, value, keyBufferCopy, label);
           final var key = keyCodec.decodeKey(keyBufferCopy, 0);
 
