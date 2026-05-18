@@ -63,6 +63,33 @@ public class CountersReaderAgent implements Agent {
     this.keepOpen = keepOpen;
   }
 
+  /**
+   * Backward compatibility constructor.
+   *
+   * @param roleName roleName
+   * @param countersDir counters directory with {@link Context#COUNTERS_FILE}
+   * @param warnIfCountersNotExists whether to log warning if counters file does not exist
+   * @param epochClock epochClock
+   * @param readInterval interval at which to read counters
+   * @param countersHandler callback handler to process counters
+   */
+  public CountersReaderAgent(
+      String roleName,
+      File countersDir,
+      boolean warnIfCountersNotExists,
+      EpochClock epochClock,
+      Duration readInterval,
+      CountersHandler countersHandler) {
+    this(
+        roleName,
+        countersDir,
+        warnIfCountersNotExists,
+        epochClock,
+        readInterval,
+        countersHandler,
+        true);
+  }
+
   @Override
   public String roleName() {
     return roleName;
