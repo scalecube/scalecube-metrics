@@ -1,15 +1,24 @@
 package io.scalecube.metrics.aeron;
 
+import static io.aeron.CncFileDescriptor.CNC_FILE;
+
 import io.aeron.Aeron;
 import io.aeron.CncFileDescriptor;
+import io.aeron.RethrowingErrorHandler;
 import io.aeron.exceptions.DriverTimeoutException;
+import io.scalecube.metrics.CounterDescriptor;
 import io.scalecube.metrics.CountersHandler;
 import io.scalecube.metrics.Delay;
+import java.io.File;
 import java.time.Duration;
+import java.util.ArrayList;
 import org.agrona.CloseHelper;
+import org.agrona.collections.Int2ObjectHashMap;
 import org.agrona.concurrent.Agent;
+import org.agrona.concurrent.AgentInvoker;
 import org.agrona.concurrent.AgentTerminationException;
 import org.agrona.concurrent.EpochClock;
+import org.agrona.concurrent.status.CountersReader;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -29,10 +38,17 @@ public class CncCountersReaderAgent implements Agent {
   }
 
   private final String roleName;
+  private final String aeronDirectoryName;
+  private final boolean warnIfCncNotExists;
   private final EpochClock epochClock;
-  private final CncCountersSnapshot countersSnapshot;
+  private final Duration driverTimeout;
   private final CountersHandler countersHandler;
+
   private final Delay readInterval;
+  private Aeron aeron;
+  private CountersReader countersReader;
+  private AgentInvoker conductorAgentInvoker;
+  private final Int2ObjectHashMap<KeyConverter> keyConverters = new Int2ObjectHashMap<>();
   private State state = State.CLOSED;
 
   /**
@@ -55,12 +71,15 @@ public class CncCountersReaderAgent implements Agent {
       Duration driverTimeout,
       CountersHandler countersHandler) {
     this.roleName = roleName;
+    this.aeronDirectoryName = aeronDirectoryName;
+    this.warnIfCncNotExists = warnIfCncNotExists;
     this.epochClock = epochClock;
-    this.readInterval = new Delay(epochClock, readInterval.toMillis());
+    this.driverTimeout = driverTimeout;
     this.countersHandler = countersHandler;
-    this.countersSnapshot =
-        new CncCountersSnapshot(
-            roleName, aeronDirectoryName, warnIfCncNotExists, driverTimeout, false);
+    this.readInterval = new Delay(epochClock, readInterval.toMillis());
+    ArchiveCountersAdapter.populate(keyConverters);
+    ClusterCountersAdapter.populate(keyConverters);
+    ClusteredServiceCountersAdapter.populate(keyConverters);
   }
 
   @Override
@@ -98,10 +117,25 @@ public class CncCountersReaderAgent implements Agent {
       return 0;
     }
 
-    if (!countersSnapshot.attach()) {
+    final var cncFile = new File(aeronDirectoryName, CNC_FILE);
+    if (!cncFile.exists()) {
+      if (warnIfCncNotExists) {
+        LOGGER.warn("[{}] {} not exists", roleName(), cncFile);
+      }
       state(State.CLEANUP);
       return 0;
     }
+
+    aeron =
+        Aeron.connect(
+            new Aeron.Context()
+                .useConductorAgentInvoker(true)
+                .aeronDirectoryName(aeronDirectoryName)
+                .errorHandler(RethrowingErrorHandler.INSTANCE)
+                .subscriberErrorHandler(RethrowingErrorHandler.INSTANCE)
+                .driverTimeoutMs(driverTimeout.toMillis()));
+    conductorAgentInvoker = aeron.conductorAgentInvoker();
+    countersReader = aeron.countersReader();
 
     state(State.RUNNING);
     LOGGER.info("[{}] Initialized, now running", roleName());
@@ -110,7 +144,7 @@ public class CncCountersReaderAgent implements Agent {
 
   private int running() {
     try {
-      countersSnapshot.conductorAgentInvoker().invoke();
+      conductorAgentInvoker.invoke();
     } catch (AgentTerminationException | DriverTimeoutException e) {
       state(State.CLEANUP);
       LOGGER.warn(
@@ -126,13 +160,31 @@ public class CncCountersReaderAgent implements Agent {
 
     readInterval.delay();
 
-    countersHandler.accept(epochClock.time(), countersSnapshot.snapshot());
+    final var timestamp = epochClock.time();
+    final var counterDescriptors = new ArrayList<CounterDescriptor>();
+    countersReader.forEach(
+        (counterId, typeId, keyBuffer, label) -> {
+          final var keyConverter = keyConverters.get(typeId);
+          if (keyConverter != null) {
+            counterDescriptors.add(
+                new CounterDescriptor(
+                    counterId,
+                    typeId,
+                    countersReader.getCounterValue(counterId),
+                    keyConverter.convert(keyBuffer, label),
+                    null));
+          }
+        });
+    countersHandler.accept(timestamp, counterDescriptors);
 
     return 0;
   }
 
   private int cleanup() {
-    CloseHelper.quietCloseAll(countersSnapshot);
+    CloseHelper.quietCloseAll(aeron);
+    aeron = null;
+    conductorAgentInvoker = null;
+    countersReader = null;
 
     State previous = state;
     if (previous != State.CLOSED) { // when it comes from onClose()
