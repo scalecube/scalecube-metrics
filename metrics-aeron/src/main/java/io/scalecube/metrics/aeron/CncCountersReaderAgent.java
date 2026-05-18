@@ -18,6 +18,7 @@ import org.agrona.concurrent.Agent;
 import org.agrona.concurrent.AgentInvoker;
 import org.agrona.concurrent.AgentTerminationException;
 import org.agrona.concurrent.EpochClock;
+import org.agrona.concurrent.UnsafeBuffer;
 import org.agrona.concurrent.status.CountersReader;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -165,13 +166,15 @@ public class CncCountersReaderAgent implements Agent {
     countersReader.forEach(
         (counterId, typeId, keyBuffer, label) -> {
           final var keyConverter = keyConverters.get(typeId);
+          final var keyBufferCopy = new UnsafeBuffer(new byte[keyBuffer.capacity()]);
+          keyBuffer.getBytes(0, keyBufferCopy, 0, keyBufferCopy.capacity());
           if (keyConverter != null) {
             counterDescriptors.add(
                 new CounterDescriptor(
                     counterId,
                     typeId,
                     countersReader.getCounterValue(counterId),
-                    keyConverter.convert(keyBuffer, label),
+                    keyConverter.convert(keyBufferCopy, label),
                     null));
           }
         });

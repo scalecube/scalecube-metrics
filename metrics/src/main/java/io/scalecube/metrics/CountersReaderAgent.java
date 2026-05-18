@@ -55,6 +55,7 @@ public class CountersReaderAgent implements Agent {
   private long countersPid = -1;
   private int countersValuesBufferLength = -1;
   private CountersReader countersReader;
+  private final boolean keepOpen;
   private State state = State.CLOSED;
 
   /**
@@ -66,6 +67,8 @@ public class CountersReaderAgent implements Agent {
    * @param epochClock epochClock
    * @param readInterval interval at which to read counters
    * @param countersHandler callback handler to process counters
+   * @param keepOpen set to true to keep the mmaped file open the whole time, false if it should be
+   *     closed immediately after reading
    */
   public CountersReaderAgent(
       String roleName,
@@ -73,13 +76,33 @@ public class CountersReaderAgent implements Agent {
       boolean warnIfCountersNotExists,
       EpochClock epochClock,
       Duration readInterval,
-      CountersHandler countersHandler) {
+      CountersHandler countersHandler,
+      boolean keepOpen) {
     this.roleName = roleName;
     this.countersDir = countersDir;
     this.warnIfCountersNotExists = warnIfCountersNotExists;
     this.epochClock = epochClock;
     this.countersHandler = countersHandler;
     this.readInterval = new Delay(epochClock, readInterval.toMillis());
+    this.keepOpen = keepOpen;
+  }
+
+  /** Compatibility Constructor, use keepOpen=true. */
+  public CountersReaderAgent(
+      String roleName,
+      File countersDir,
+      boolean warnIfCountersNotExists,
+      EpochClock epochClock,
+      Duration readInterval,
+      CountersHandler countersHandler) {
+    this(
+        roleName,
+        countersDir,
+        warnIfCountersNotExists,
+        epochClock,
+        readInterval,
+        countersHandler,
+        true);
   }
 
   @Override
@@ -100,7 +123,13 @@ public class CountersReaderAgent implements Agent {
     try {
       return switch (state) {
         case INIT -> init();
-        case RUNNING -> running();
+        case RUNNING -> {
+          final var val = running();
+          if (!keepOpen) {
+            cleanup();
+          }
+          yield val;
+        }
         case CLEANUP -> cleanup();
         default -> throw new AgentTerminationException("Unknown state: " + state);
       };
@@ -169,8 +198,10 @@ public class CountersReaderAgent implements Agent {
     countersReader.forEach(
         (counterId, typeId, keyBuffer, label) -> {
           final var value = countersReader.getCounterValue(counterId);
-          final var counter = new CounterDescriptor(counterId, typeId, value, keyBuffer, label);
-          final var key = keyCodec.decodeKey(keyBuffer, 0);
+          final var keyBufferCopy = new UnsafeBuffer(new byte[keyBuffer.capacity()]);
+          keyBuffer.getBytes(0, keyBufferCopy, 0, keyBufferCopy.capacity());
+          final var counter = new CounterDescriptor(counterId, typeId, value, keyBufferCopy, label);
+          final var key = keyCodec.decodeKey(keyBufferCopy, 0);
 
           if (hasWriteEpochId(key)) {
             writeGroups.computeIfAbsent(writeEpochId(key), k -> new IntHashSet()).add(counterId);
