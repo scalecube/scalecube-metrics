@@ -283,4 +283,8 @@ public class MetricsReaderAgent implements MessageHandler, Agent {
   private void state(State state) {
     this.state = state;
   }
+
+  public State state() {
+    return state;
+  }
 }
