@@ -6,7 +6,6 @@ import java.lang.management.ThreadMXBean;
 import org.agrona.CloseHelper;
 import org.agrona.collections.Object2ObjectHashMap;
 import org.agrona.concurrent.Agent;
-import org.agrona.concurrent.AgentTerminationException;
 import org.agrona.concurrent.EpochClock;
 import org.agrona.concurrent.status.AtomicCounter;
 import org.slf4j.Logger;
@@ -69,7 +68,7 @@ public class JvmMetricsAgent implements Agent {
   @Override
   public void onStart() {
     if (state != State.CLOSED) {
-      throw new AgentTerminationException("Illegal state: " + state);
+      throw new IllegalStateException("Illegal state: " + state);
     }
 
     memFree =
@@ -110,10 +109,8 @@ public class JvmMetricsAgent implements Agent {
         case INIT -> init();
         case RUNNING -> running();
         case CLEANUP -> cleanup();
-        default -> throw new AgentTerminationException("Unknown state: " + state);
+        case CLOSED -> 0;
       };
-    } catch (AgentTerminationException e) {
-      throw e;
     } catch (Exception e) {
       state(State.CLEANUP);
       throw e;

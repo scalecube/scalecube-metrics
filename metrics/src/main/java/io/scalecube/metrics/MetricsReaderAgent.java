@@ -17,7 +17,6 @@ import java.time.Duration;
 import org.agrona.BufferUtil;
 import org.agrona.MutableDirectBuffer;
 import org.agrona.concurrent.Agent;
-import org.agrona.concurrent.AgentTerminationException;
 import org.agrona.concurrent.EpochClock;
 import org.agrona.concurrent.MessageHandler;
 import org.agrona.concurrent.UnsafeBuffer;
@@ -94,7 +93,7 @@ public class MetricsReaderAgent implements MessageHandler, Agent {
   @Override
   public void onStart() {
     if (state != State.CLOSED) {
-      throw new AgentTerminationException("Illegal state: " + state);
+      throw new IllegalStateException("Illegal state: " + state);
     }
     state(State.INIT);
   }
@@ -106,10 +105,8 @@ public class MetricsReaderAgent implements MessageHandler, Agent {
         case INIT -> init();
         case RUNNING -> running();
         case CLEANUP -> cleanup();
-        default -> throw new AgentTerminationException("Unknown state: " + state);
+        case CLOSED -> 0;
       };
-    } catch (AgentTerminationException e) {
-      throw e;
     } catch (Exception e) {
       state(State.CLEANUP);
       throw e;

@@ -19,7 +19,6 @@ import java.util.List;
 import org.agrona.BufferUtil;
 import org.agrona.collections.Int2ObjectHashMap;
 import org.agrona.concurrent.Agent;
-import org.agrona.concurrent.AgentTerminationException;
 import org.agrona.concurrent.EpochClock;
 import org.agrona.concurrent.UnsafeBuffer;
 import org.agrona.concurrent.status.CountersReader;
@@ -86,7 +85,7 @@ public class CncCountersReaderAgent implements Agent {
   @Override
   public void onStart() {
     if (state != State.CLOSED) {
-      throw new AgentTerminationException("Illegal state: " + state);
+      throw new IllegalStateException("Illegal state: " + state);
     }
     state(State.READ_COUNTERS);
   }
@@ -97,10 +96,8 @@ public class CncCountersReaderAgent implements Agent {
       return switch (state) {
         case READ_COUNTERS -> readCounters();
         case CLEANUP -> cleanup();
-        default -> throw new AgentTerminationException("Unknown state: " + state);
+        case CLOSED -> 0;
       };
-    } catch (AgentTerminationException e) {
-      throw e;
     } catch (Exception e) {
       state(State.CLEANUP);
       throw e;
