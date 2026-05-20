@@ -15,6 +15,7 @@ import java.io.File;
 import java.nio.channels.FileChannel.MapMode;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.List;
 import org.agrona.BufferUtil;
 import org.agrona.collections.Int2ObjectHashMap;
 import org.agrona.concurrent.Agent;
@@ -130,31 +131,32 @@ public class CncCountersReaderAgent implements Agent {
               createCountersMetaDataBuffer(cncByteBuffer, cncMetaData),
               createCountersValuesBuffer(cncByteBuffer, cncMetaData),
               US_ASCII);
-
-      final var timestamp = epochClock.time();
-      final var counterDescriptors = new ArrayList<CounterDescriptor>();
-      countersReader.forEach(
-          (counterId, typeId, keyBuffer, label) -> {
-            final var keyConverter = keyConverters.get(typeId);
-            final var keyBufferCopy = new UnsafeBuffer(new byte[keyBuffer.capacity()]);
-            keyBuffer.getBytes(0, keyBufferCopy, 0, keyBufferCopy.capacity());
-            if (keyConverter != null) {
-              counterDescriptors.add(
-                  new CounterDescriptor(
-                      counterId,
-                      typeId,
-                      countersReader.getCounterValue(counterId),
-                      keyConverter.convert(keyBufferCopy, label),
-                      null));
-            }
-          });
-
-      countersHandler.accept(timestamp, counterDescriptors);
+      countersHandler.accept(epochClock.time(), readCounters(countersReader));
     } finally {
       BufferUtil.free(cncByteBuffer);
     }
 
     return 0;
+  }
+
+  private List<CounterDescriptor> readCounters(CountersReader countersReader) {
+    final var counterDescriptors = new ArrayList<CounterDescriptor>();
+    countersReader.forEach(
+        (counterId, typeId, keyBuffer, label) -> {
+          final var keyConverter = keyConverters.get(typeId);
+          final var keyBufferCopy = new UnsafeBuffer(new byte[keyBuffer.capacity()]);
+          keyBuffer.getBytes(0, keyBufferCopy, 0, keyBufferCopy.capacity());
+          if (keyConverter != null) {
+            counterDescriptors.add(
+                new CounterDescriptor(
+                    counterId,
+                    typeId,
+                    countersReader.getCounterValue(counterId),
+                    keyConverter.convert(keyBufferCopy, label),
+                    null));
+          }
+        });
+    return counterDescriptors;
   }
 
   private int cleanup() {

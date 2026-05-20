@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.assertArg;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 
 import io.scalecube.metrics.CountersReaderAgent.State;
@@ -64,11 +65,12 @@ class CountersReaderAgentTest {
   void testWorkWithEmptyCounters() {
     try (final var countersRegistry = CountersRegistry.create()) {
       agent.doWork();
-      assertEquals(State.RUNNING, agent.state());
+      assertEquals(State.READ_COUNTERS, agent.state());
       epochClock.advance(READ_INTERVAL.toMillis() + 1);
       agent.doWork();
-      assertEquals(State.RUNNING, agent.state());
-      verify(countersHandler).accept(anyLong(), assertArg(list -> assertEquals(0, list.size())));
+      assertEquals(State.READ_COUNTERS, agent.state());
+      verify(countersHandler, times(2))
+          .accept(anyLong(), assertArg(list -> assertEquals(0, list.size())));
     }
   }
 
@@ -81,11 +83,11 @@ class CountersReaderAgentTest {
       counter.set(value);
 
       agent.doWork();
-      assertEquals(State.RUNNING, agent.state());
+      assertEquals(State.READ_COUNTERS, agent.state());
       epochClock.advance(READ_INTERVAL.toMillis() + 1);
       agent.doWork();
-      assertEquals(State.RUNNING, agent.state());
-      verify(countersHandler)
+      assertEquals(State.READ_COUNTERS, agent.state());
+      verify(countersHandler, times(2))
           .accept(
               anyLong(),
               assertArg(
@@ -122,11 +124,11 @@ class CountersReaderAgentTest {
       writeEpoch.increment();
 
       agent.doWork();
-      assertEquals(State.RUNNING, agent.state());
+      assertEquals(State.READ_COUNTERS, agent.state());
       epochClock.advance(READ_INTERVAL.toMillis() + 1);
       agent.doWork();
-      assertEquals(State.RUNNING, agent.state());
-      verify(countersHandler)
+      assertEquals(State.READ_COUNTERS, agent.state());
+      verify(countersHandler, times(2))
           .accept(
               anyLong(),
               assertArg(
@@ -165,11 +167,12 @@ class CountersReaderAgentTest {
       // writeEpoch.increment();
 
       agent.doWork();
-      assertEquals(State.RUNNING, agent.state());
+      assertEquals(State.READ_COUNTERS, agent.state());
       epochClock.advance(READ_INTERVAL.toMillis() + 1);
       agent.doWork();
-      assertEquals(State.RUNNING, agent.state());
-      verify(countersHandler).accept(anyLong(), assertArg(list -> assertEquals(0, list.size())));
+      assertEquals(State.READ_COUNTERS, agent.state());
+      verify(countersHandler, times(2))
+          .accept(anyLong(), assertArg(list -> assertEquals(0, list.size())));
     }
   }
 
@@ -184,7 +187,7 @@ class CountersReaderAgentTest {
     try (final var countersRegistry =
         CountersRegistry.create(new Context().dirDeleteOnShutdown(true))) {
       agent.doWork();
-      assertEquals(State.RUNNING, agent.state());
+      assertEquals(State.READ_COUNTERS, agent.state());
     }
     epochClock.advance(READ_INTERVAL.toMillis() + 1);
     agent.doWork();
@@ -195,7 +198,7 @@ class CountersReaderAgentTest {
   void testWorkWhenCountersRestarted() {
     try (final var countersRegistry = CountersRegistry.create(new Context())) {
       agent.doWork();
-      assertEquals(State.RUNNING, agent.state());
+      assertEquals(State.READ_COUNTERS, agent.state());
     }
     try (final var countersRegistry = CountersRegistry.create(new Context())) {
       updateCountersHeader(OLD_START_TIMESTAMP, OLD_PID, OLD_BUFFER_LENGTH);
