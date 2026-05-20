@@ -152,7 +152,6 @@ public class MimirAllInOneAeron {
                 true,
                 SystemEpochClock.INSTANCE,
                 Duration.ofSeconds(3),
-                Duration.ofSeconds(5),
                 new CountersMimirHandler(null, mimirPublisher.proxy())),
             new MetricsReaderAgent(
                 "MetricsReaderAgent",

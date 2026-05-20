@@ -22,7 +22,6 @@ import org.junit.jupiter.api.Test;
 class CncCountersReaderAgentTest {
 
   private static final Duration READ_INTERVAL = Duration.ofSeconds(3);
-  private static final Duration DRIVER_TIMEOUT = Duration.ofMillis(500);
 
   private final CachedEpochClock epochClock = new CachedEpochClock();
   private final CountersHandler countersHandler = mock(CountersHandler.class);
@@ -38,7 +37,6 @@ class CncCountersReaderAgentTest {
             true,
             epochClock,
             READ_INTERVAL,
-            DRIVER_TIMEOUT,
             countersHandler);
     agent.onStart();
   }
@@ -54,10 +52,8 @@ class CncCountersReaderAgentTest {
   void testWorkWithCncCounters() {
     try (final var mediaDriver = MediaDriver.launch()) {
       agent.doWork();
-      assertEquals(State.RUNNING, agent.state());
+      assertEquals(State.READ_COUNTERS, agent.state());
       epochClock.advance(READ_INTERVAL.toMillis() + 1);
-      agent.doWork();
-      assertEquals(State.RUNNING, agent.state());
       verify(countersHandler).accept(anyLong(), anyList());
     }
   }
@@ -69,36 +65,33 @@ class CncCountersReaderAgentTest {
   }
 
   @Test
-  void testWorkWhenCncCountersShutdown() throws InterruptedException {
+  void testWorkWhenCncCountersShutdown() {
     try (final var mediaDriver = MediaDriver.launch(new Context().dirDeleteOnShutdown(true))) {
       agent.doWork();
-      assertEquals(State.RUNNING, agent.state());
+      assertEquals(State.READ_COUNTERS, agent.state());
     }
     epochClock.advance(READ_INTERVAL.toMillis() + 1);
     agent.doWork();
-    assertEquals(State.RUNNING, agent.state());
 
-    Thread.sleep(DRIVER_TIMEOUT.toMillis());
     epochClock.advance(READ_INTERVAL.toMillis() + 1);
     agent.doWork();
-    assertEquals(State.CLEANUP, agent.state());
+    assertEquals(State.READ_COUNTERS, agent.state());
   }
 
   @Test
-  void testWorkWhenCncCountersRestarted() throws InterruptedException {
+  void testWorkWhenCncCountersRestarted() {
     try (final var mediaDriver = MediaDriver.launch(new Context().dirDeleteOnShutdown(true))) {
       agent.doWork();
-      assertEquals(State.RUNNING, agent.state());
+      assertEquals(State.READ_COUNTERS, agent.state());
     }
 
-    Thread.sleep(DRIVER_TIMEOUT.toMillis());
     epochClock.advance(READ_INTERVAL.toMillis() + 1);
     agent.doWork();
     assertEquals(State.CLEANUP, agent.state());
 
     try (final var mediaDriver = MediaDriver.launch(new Context().dirDeleteOnShutdown(true))) {
       agent.doWork();
-      assertEquals(State.INIT, agent.state());
+      assertEquals(State.READ_COUNTERS, agent.state());
     }
   }
 }

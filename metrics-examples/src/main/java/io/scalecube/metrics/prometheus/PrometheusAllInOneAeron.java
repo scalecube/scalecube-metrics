@@ -179,7 +179,6 @@ public class PrometheusAllInOneAeron {
                 true,
                 SystemEpochClock.INSTANCE,
                 Duration.ofSeconds(3),
-                Duration.ofSeconds(5),
                 cncCountersAdapter),
             new MetricsReaderAgent(
                 "MetricsReaderAgent",
