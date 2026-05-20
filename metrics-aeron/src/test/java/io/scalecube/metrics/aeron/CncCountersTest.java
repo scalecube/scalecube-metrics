@@ -165,15 +165,14 @@ public class CncCountersTest {
             true,
             epochClock,
             READ_INTERVAL,
-            DRIVER_TIMEOUT,
             countersHandler);
     agent.onStart();
 
     agent.doWork(); // INIT -> RUNNING
-    assertEquals(State.RUNNING, agent.state());
+    assertEquals(State.READ_COUNTERS, agent.state());
     epochClock.advance(READ_INTERVAL.toMillis() + 1);
     agent.doWork(); // RUNNING + countersHandler.accept()
-    assertEquals(State.RUNNING, agent.state());
+    assertEquals(State.READ_COUNTERS, agent.state());
 
     final var counters = reference.get();
     assertNotNull(counters, "counters");
@@ -199,15 +198,14 @@ public class CncCountersTest {
             true,
             epochClock,
             READ_INTERVAL,
-            DRIVER_TIMEOUT,
             countersHandler);
     agent.onStart();
 
     agent.doWork(); // INIT -> RUNNING
-    assertEquals(State.RUNNING, agent.state());
+    assertEquals(State.READ_COUNTERS, agent.state());
     epochClock.advance(READ_INTERVAL.toMillis() + 1);
     agent.doWork(); // RUNNING + countersHandler.accept()
-    assertEquals(State.RUNNING, agent.state());
+    assertEquals(State.READ_COUNTERS, agent.state());
 
     final var counters = reference.get();
     assertNotNull(counters, "counters");
