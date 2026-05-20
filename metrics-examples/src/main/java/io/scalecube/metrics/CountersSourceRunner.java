@@ -1,8 +1,7 @@
-package io.scalecube.metrics.counters;
+package io.scalecube.metrics;
 
 import io.aeron.archive.Archive;
 import io.aeron.driver.MediaDriver;
-import io.scalecube.metrics.CountersRegistry;
 
 public class CountersSourceRunner {
 
