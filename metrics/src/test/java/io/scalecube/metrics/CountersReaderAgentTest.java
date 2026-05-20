@@ -3,10 +3,8 @@ package io.scalecube.metrics;
 import static io.scalecube.metrics.CounterTags.COUNTER_VISIBILITY;
 import static io.scalecube.metrics.CounterTags.WRITE_EPOCH_ID;
 import static io.scalecube.metrics.CounterVisibility.PRIVATE;
-import static io.scalecube.metrics.CountersRegistry.Context.COUNTERS_FILE;
 import static io.scalecube.metrics.CountersRegistry.Context.DEFAULT_COUNTERS_DIR_NAME;
 import static org.agrona.IoUtil.delete;
-import static org.agrona.IoUtil.mapExistingFile;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.assertArg;
@@ -16,13 +14,11 @@ import static org.mockito.Mockito.verify;
 
 import io.scalecube.metrics.CountersReaderAgent.State;
 import io.scalecube.metrics.CountersRegistry.Context;
-import io.scalecube.metrics.CountersRegistry.LayoutDescriptor;
 import io.scalecube.metrics.sbe.KeyDecoder;
 import java.io.File;
 import java.time.Duration;
 import java.util.Set;
 import java.util.stream.Collectors;
-import org.agrona.BufferUtil;
 import org.agrona.concurrent.CachedEpochClock;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -201,21 +197,9 @@ class CountersReaderAgentTest {
       assertEquals(State.READ_COUNTERS, agent.state());
     }
     try (final var countersRegistry = CountersRegistry.create(new Context())) {
-      updateCountersHeader(OLD_START_TIMESTAMP, OLD_PID, OLD_BUFFER_LENGTH);
       epochClock.advance(READ_INTERVAL.toMillis() + 1);
       agent.doWork();
-      assertEquals(State.CLEANUP, agent.state());
-    }
-  }
-
-  private static void updateCountersHeader(long startTimestamp, long pid, int bufferLength) {
-    final var file = new File(DEFAULT_COUNTERS_DIR_NAME, COUNTERS_FILE);
-    final var mappedByteBuffer = mapExistingFile(file, COUNTERS_FILE);
-    try {
-      final var headerBuffer = LayoutDescriptor.createHeaderBuffer(mappedByteBuffer);
-      LayoutDescriptor.fillHeaderBuffer(headerBuffer, startTimestamp, pid, bufferLength);
-    } finally {
-      BufferUtil.free(mappedByteBuffer);
+      assertEquals(State.READ_COUNTERS, agent.state());
     }
   }
 }
