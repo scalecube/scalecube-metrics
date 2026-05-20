@@ -68,7 +68,6 @@ import org.junit.jupiter.params.provider.MethodSource;
 public class CncCountersTest {
 
   private static final Duration READ_INTERVAL = Duration.ofSeconds(3);
-  private static final Duration DRIVER_TIMEOUT = Duration.ofMillis(5000);
 
   private static final int ARCHIVE_ID = 1;
   private static final int CLUSTER_ID = Configuration.clusterId();
