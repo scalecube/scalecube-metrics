@@ -50,8 +50,6 @@ public class MetricsReaderAgent implements MessageHandler, Agent {
   private final Delay heartbeatTimeout;
   private MappedByteBuffer metricsByteBuffer;
   private final UnsafeBuffer headerBuffer = new UnsafeBuffer();
-  private long metricsStartTimestamp = -1;
-  private long metricsPid = -1;
   private int metricsBufferLength = -1;
   private ByteBuffer scratchBuffer;
   private CopyBroadcastReceiver broadcastReceiver;
@@ -120,7 +118,10 @@ public class MetricsReaderAgent implements MessageHandler, Agent {
 
     metricsFile = new File(metricsDir, METRICS_FILE);
 
-    if (!isActive(metricsFile)) {
+    if (!metricsFile.exists()) {
+      if (warnIfMetricsNotExists) {
+        LOGGER.warn("[{}] {} not exists", roleName(), metricsFile);
+      }
       state(State.CLEANUP);
       return 0;
     }
@@ -128,8 +129,6 @@ public class MetricsReaderAgent implements MessageHandler, Agent {
     metricsByteBuffer = mapExistingFile(metricsFile, MapMode.READ_ONLY, METRICS_FILE);
     final var headerLength = LayoutDescriptor.HEADER_LENGTH;
     headerBuffer.wrap(metricsByteBuffer, 0, headerLength);
-    metricsStartTimestamp = LayoutDescriptor.startTimestamp(headerBuffer);
-    metricsPid = LayoutDescriptor.pid(headerBuffer);
     metricsBufferLength = LayoutDescriptor.metricsBufferLength(headerBuffer);
 
     if (metricsBufferLength <= 0) {
@@ -221,45 +220,12 @@ public class MetricsReaderAgent implements MessageHandler, Agent {
     metricsHandler.onTps(timestamp, keyBuffer, keyOffset, keyLength, value);
   }
 
-  private boolean isActive(File metricsFile) {
-    if (!metricsFile.exists()) {
-      if (warnIfMetricsNotExists) {
-        LOGGER.warn("[{}] {} not exists", roleName(), metricsFile);
-      }
-      return false;
-    }
-
-    final var buffer = mapExistingFile(metricsFile, MapMode.READ_ONLY, METRICS_FILE);
-    try {
-      if (!LayoutDescriptor.isMetricsHeaderLengthSufficient(buffer.capacity())) {
-        LOGGER.warn("[{}] {} has not sufficient length", roleName(), metricsFile);
-        return false;
-      }
-      headerBuffer.wrap(buffer, 0, LayoutDescriptor.HEADER_LENGTH);
-      if (!LayoutDescriptor.isMetricsFileLengthSufficient(headerBuffer, buffer.capacity())) {
-        LOGGER.warn("[{}] {} has not sufficient length", roleName(), metricsFile);
-        return false;
-      }
-      if (metricsBufferLength != -1
-          && !LayoutDescriptor.isMetricsActive(headerBuffer, metricsStartTimestamp, metricsPid)) {
-        LOGGER.warn("[{}] {} is not active", roleName(), metricsFile);
-        return false;
-      }
-    } finally {
-      BufferUtil.free(buffer);
-    }
-
-    return true;
-  }
-
   private int cleanup() {
     BufferUtil.free(scratchBuffer);
     scratchBuffer = null;
     BufferUtil.free(metricsByteBuffer);
     metricsByteBuffer = null;
     metricsFile = null;
-    metricsStartTimestamp = -1;
-    metricsPid = -1;
     metricsBufferLength = -1;
 
     State previous = state;
