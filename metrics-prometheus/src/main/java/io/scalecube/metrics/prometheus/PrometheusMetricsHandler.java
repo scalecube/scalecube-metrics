@@ -47,6 +47,7 @@ public class PrometheusMetricsHandler implements HttpHandler {
     final var responseHeaders = exchange.getResponseHeaders();
     responseHeaders.set("Content-Type", "text/plain; version=0.0.4; charset=utf-8");
     responseHeaders.set("Content-Encoding", "gzip");
+    final var start = System.currentTimeMillis();
 
     try (var writer =
         new OutputStreamWriter(
@@ -58,6 +59,10 @@ public class PrometheusMetricsHandler implements HttpHandler {
       }
       writer.flush();
     } catch (Exception e) {
+      if (isBrokenPipe(e)) {
+        LOGGER.warn("Broken pipe occurred while sending metrics (client likely closed connection)");
+        return;
+      }
       LOGGER.warn("Exception occurred", e);
       try {
         exchange.sendResponseHeaders(500, -1);
@@ -65,5 +70,12 @@ public class PrometheusMetricsHandler implements HttpHandler {
         // ignore
       }
     }
+  }
+
+  private static boolean isBrokenPipe(Throwable e) {
+    if (e instanceof java.io.IOException && e.getMessage() != null) {
+      return e.getMessage().toLowerCase().contains("broken pipe");
+    }
+    return e.getCause() != null && isBrokenPipe(e.getCause());
   }
 }
