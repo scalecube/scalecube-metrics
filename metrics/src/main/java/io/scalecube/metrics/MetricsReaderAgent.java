@@ -145,8 +145,10 @@ public class MetricsReaderAgent implements MessageHandler, Agent {
             new UnsafeBuffer(scratchBuffer));
     broadcastReceiver.receive(
         (msgTypeId, buffer, index, length) -> {
-          // no-op
+          // skip first
         });
+
+    heartbeatTimeout.delay();
 
     state(State.RUNNING);
     LOGGER.info("[{}] Initialized, now running", roleName());
@@ -155,12 +157,9 @@ public class MetricsReaderAgent implements MessageHandler, Agent {
 
   private int running() {
     if (heartbeatTimeout.isOverdue()) {
-      heartbeatTimeout.delay();
-      if (!isActive(metricsFile)) {
-        state(State.CLEANUP);
-        LOGGER.warn("[{}] {} is not active, proceed to cleanup", roleName(), metricsFile);
-        return 0;
-      }
+      LOGGER.warn("[{}] {} is not active", roleName(), metricsFile);
+      state(State.CLEANUP);
+      return 0;
     }
     return broadcastReceiver.receive(this);
   }
