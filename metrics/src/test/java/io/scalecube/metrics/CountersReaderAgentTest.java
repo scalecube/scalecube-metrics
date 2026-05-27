@@ -14,7 +14,6 @@ import static org.mockito.Mockito.verify;
 
 import io.scalecube.metrics.CountersReaderAgent.State;
 import io.scalecube.metrics.CountersRegistry.Context;
-import io.scalecube.metrics.sbe.KeyDecoder;
 import java.io.File;
 import java.time.Duration;
 import java.util.Set;
@@ -27,11 +26,7 @@ import org.junit.jupiter.api.Test;
 class CountersReaderAgentTest {
 
   private static final Duration READ_INTERVAL = Duration.ofSeconds(3);
-  private static final long OLD_START_TIMESTAMP = 10042;
-  private static final long OLD_PID = 100500;
-  private static final int OLD_BUFFER_LENGTH = 8 * 1024 * 1024;
 
-  private final KeyDecoder keyDecoder = new KeyDecoder();
   private final CachedEpochClock epochClock = new CachedEpochClock();
   private final CountersHandler countersHandler = mock(CountersHandler.class);
   private CountersReaderAgent agent;

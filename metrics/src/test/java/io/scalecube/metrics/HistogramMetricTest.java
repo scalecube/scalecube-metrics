@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import io.scalecube.metrics.MetricsReaderAgent.State;
 import java.time.Duration;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
@@ -22,6 +23,7 @@ class HistogramMetricTest {
   private static final long HIGHEST_TRACKABLE_VALUE = TimeUnit.SECONDS.toNanos(1);
   private static final double CONVERSION_FACTOR = 1e-3;
   private static final long RESOLUTION = TimeUnit.SECONDS.toMillis(1);
+  private static final long RETRY_INTERVAL = TimeUnit.SECONDS.toMillis(1);
 
   private final CachedEpochClock epochClock = new CachedEpochClock();
   private final MetricsHandlerImpl metricsHandler = new MetricsHandlerImpl();
@@ -32,14 +34,17 @@ class HistogramMetricTest {
   void beforeEach() {
     metricsRecorder =
         MetricsRecorder.launch(
-            new MetricsRecorder.Context().useAgentInvoker(true).epochClock(epochClock));
+            new MetricsRecorder.Context()
+                .useAgentInvoker(true)
+                .epochClock(epochClock)
+                .dirDeleteOnShutdown(true));
     metricsReaderAgent =
         new MetricsReaderAgent(
             "reader",
             metricsRecorder.context().metricsDir(),
             true,
             epochClock,
-            Duration.ofSeconds(1),
+            Duration.ofMillis(RETRY_INTERVAL),
             metricsHandler);
 
     // kick-off
@@ -281,18 +286,184 @@ class HistogramMetricTest {
     }
   }
 
+  @Nested
+  class Reconnection {
+
+    @Test
+    void testHeartbeatTimeoutThenReconnect() {
+      final var name = "foo";
+      final var histogram =
+          metricsRecorder.newHistogram(
+              keyFlyweight ->
+                  keyFlyweight
+                      .tagsCount(3)
+                      .stringValue("name", name)
+                      .stringValue("kind", "k")
+                      .stringValue("type", "t"),
+              HIGHEST_TRACKABLE_VALUE,
+              CONVERSION_FACTOR,
+              RESOLUTION);
+      metricsRecorder.agentInvoker().invoke(); // on-board
+
+      histogram.record(100);
+      histogram.record(200);
+      histogram.record(300);
+      histogram.record(200);
+
+      advanceClock(RESOLUTION);
+      metricsRecorder.agentInvoker().invoke();
+      metricsReaderAgent.doWork();
+
+      metricsHandler.assertHasRead();
+      metricsHandler.assertName(name);
+      assertEquals(4, metricsHandler.accumulated.getTotalCount(), "accumulated.totalCount");
+      assertEquals(4, metricsHandler.distinct.getTotalCount(), "distinct.totalCount");
+      metricsHandler.assertKey(
+          key -> {
+            Assertions.assertEquals(name, key.stringValue("name"), "name");
+            Assertions.assertEquals("k", key.stringValue("kind"), "kind");
+            Assertions.assertEquals("t", key.stringValue("type"), "type");
+          });
+
+      for (int i = 0; i < 5; i++) {
+        // Reset
+        metricsHandler.reset();
+
+        // Advance
+        advanceClock(RESOLUTION);
+        metricsRecorder.agentInvoker().invoke();
+        metricsReaderAgent.doWork();
+
+        metricsHandler.assertKey(
+            key -> {
+              Assertions.assertEquals(name, key.stringValue("name"), "name");
+              Assertions.assertEquals("k", key.stringValue("kind"), "kind");
+              Assertions.assertEquals("t", key.stringValue("type"), "type");
+            });
+
+        // Verify that received empty histograms
+        assertEquals(4, metricsHandler.accumulated.getTotalCount(), "accumulated.totalCount");
+        assertEquals(0, metricsHandler.distinct.getTotalCount(), "distinct.totalCount");
+      }
+
+      // Advance for timeout overdue
+      advanceClock(RESOLUTION * 10);
+      metricsRecorder.agentInvoker().invoke();
+      metricsReaderAgent.doWork();
+      assertEquals(State.CLEANUP, metricsReaderAgent.state(), "metricsReaderAgent.state");
+
+      // Advance for retry overdue
+      advanceClock(RESOLUTION * 10);
+      metricsRecorder.agentInvoker().invoke();
+      metricsReaderAgent.doWork();
+      assertEquals(State.INIT, metricsReaderAgent.state(), "metricsReaderAgent.state");
+
+      // Advance for retry overdue
+      advanceClock(RESOLUTION * 10);
+      metricsRecorder.agentInvoker().invoke();
+      metricsReaderAgent.doWork();
+      assertEquals(State.RUNNING, metricsReaderAgent.state(), "metricsReaderAgent.state");
+    }
+
+    @Test
+    void testMetricsClosedThenReconnect() {
+      final var name = "foo";
+      HistogramMetric histogram =
+          metricsRecorder.newHistogram(
+              keyFlyweight ->
+                  keyFlyweight
+                      .tagsCount(3)
+                      .stringValue("name", name)
+                      .stringValue("kind", "k")
+                      .stringValue("type", "t"),
+              HIGHEST_TRACKABLE_VALUE,
+              CONVERSION_FACTOR,
+              RESOLUTION);
+      metricsRecorder.agentInvoker().invoke(); // on-board
+
+      histogram.record(100);
+      histogram.record(200);
+      histogram.record(300);
+      histogram.record(200);
+
+      advanceClock(RESOLUTION);
+      metricsRecorder.agentInvoker().invoke();
+      metricsReaderAgent.doWork();
+
+      metricsHandler.assertHasRead();
+      metricsHandler.assertName(name);
+      assertEquals(4, metricsHandler.accumulated.getTotalCount(), "accumulated.totalCount");
+      assertEquals(4, metricsHandler.distinct.getTotalCount(), "distinct.totalCount");
+      metricsHandler.assertKey(
+          key -> {
+            Assertions.assertEquals(name, key.stringValue("name"), "name");
+            Assertions.assertEquals("k", key.stringValue("kind"), "kind");
+            Assertions.assertEquals("t", key.stringValue("type"), "type");
+          });
+
+      // Close (dir will be deleted)
+      CloseHelper.quietClose(metricsRecorder);
+
+      // Advance for timeout overdue
+      advanceClock(RESOLUTION * 10);
+      metricsReaderAgent.doWork();
+      assertEquals(State.CLEANUP, metricsReaderAgent.state(), "metricsReaderAgent.state");
+
+      // Advance for retry overdue
+      advanceClock(RESOLUTION * 10);
+      metricsReaderAgent.doWork();
+      assertEquals(State.INIT, metricsReaderAgent.state(), "metricsReaderAgent.state");
+
+      // Advance for retry overdue
+      advanceClock(RESOLUTION * 10);
+      metricsReaderAgent.doWork();
+      assertEquals(State.CLEANUP, metricsReaderAgent.state(), "metricsReaderAgent.state");
+
+      // Restart
+      metricsRecorder =
+          MetricsRecorder.launch(
+              new MetricsRecorder.Context()
+                  .useAgentInvoker(true)
+                  .epochClock(epochClock)
+                  .dirDeleteOnShutdown(true));
+      histogram =
+          metricsRecorder.newHistogram(
+              keyFlyweight ->
+                  keyFlyweight
+                      .tagsCount(3)
+                      .stringValue("name", name)
+                      .stringValue("kind", "k")
+                      .stringValue("type", "t"),
+              HIGHEST_TRACKABLE_VALUE,
+              CONVERSION_FACTOR,
+              RESOLUTION);
+
+      // Advance for retry overdue
+      advanceClock(RESOLUTION * 10);
+      metricsRecorder.agentInvoker().invoke();
+      metricsReaderAgent.doWork();
+      assertEquals(State.INIT, metricsReaderAgent.state(), "metricsReaderAgent.state");
+
+      // Advance for retry overdue
+      advanceClock(RESOLUTION * 10);
+      metricsRecorder.agentInvoker().invoke();
+      metricsReaderAgent.doWork();
+      assertEquals(State.RUNNING, metricsReaderAgent.state(), "metricsReaderAgent.state");
+    }
+  }
+
   private void advanceClock(long step) {
     epochClock.advance(step);
   }
 
   private static class MetricsHandlerImpl implements MetricsHandler {
 
-    long timestamp;
+    long timestamp = -1;
     Key key;
     Histogram accumulated;
     Histogram distinct;
-    long highestTrackableValue;
-    double conversionFactor;
+    long highestTrackableValue = -1;
+    double conversionFactor = -1;
 
     @Override
     public void onHistogram(
@@ -310,6 +481,15 @@ class HistogramMetricTest {
       this.distinct = distinct;
       this.highestTrackableValue = highestTrackableValue;
       this.conversionFactor = conversionFactor;
+    }
+
+    void reset() {
+      timestamp = -1;
+      key = null;
+      accumulated = null;
+      distinct = null;
+      highestTrackableValue = -1;
+      conversionFactor = -1;
     }
 
     void assertHasRead() {
