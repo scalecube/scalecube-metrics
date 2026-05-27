@@ -44,10 +44,12 @@ public class MetricsReaderAgent implements MessageHandler, Agent {
   private final File metricsDir;
   private final boolean warnIfMetricsNotExists;
   private final MetricsHandler metricsHandler;
+  private final EpochClock epochClock;
+  private final long retryInterval;
 
   private File metricsFile;
-  private final Delay retryInterval;
-  private final Delay heartbeatTimeout;
+  private long nextRetryTime;
+  private long nextHeartbeatTimeout;
   private MappedByteBuffer metricsByteBuffer;
   private final UnsafeBuffer headerBuffer = new UnsafeBuffer();
   private int metricsBufferLength = -1;
@@ -79,8 +81,8 @@ public class MetricsReaderAgent implements MessageHandler, Agent {
     this.metricsDir = metricsDir;
     this.warnIfMetricsNotExists = warnIfMetricsNotExists;
     this.metricsHandler = metricsHandler;
-    this.retryInterval = new Delay(epochClock, retryInterval.toMillis());
-    this.heartbeatTimeout = new Delay(epochClock, retryInterval.toMillis());
+    this.epochClock = epochClock;
+    this.retryInterval = retryInterval.toMillis();
   }
 
   @Override
@@ -112,7 +114,7 @@ public class MetricsReaderAgent implements MessageHandler, Agent {
   }
 
   private int init() {
-    if (retryInterval.isNotOverdue()) {
+    if (epochClock.time() < nextRetryTime) {
       return 0;
     }
 
@@ -147,7 +149,7 @@ public class MetricsReaderAgent implements MessageHandler, Agent {
           // skip first
         });
 
-    heartbeatTimeout.delay();
+    nextHeartbeatTimeout = epochClock.time() + retryInterval;
 
     state(State.RUNNING);
     LOGGER.info("[{}] Initialized, now running", roleName());
@@ -155,7 +157,7 @@ public class MetricsReaderAgent implements MessageHandler, Agent {
   }
 
   private int running() {
-    if (heartbeatTimeout.isOverdue()) {
+    if (epochClock.time() > nextHeartbeatTimeout) {
       LOGGER.warn("[{}] {} is not active", roleName(), metricsFile);
       state(State.CLEANUP);
       return 0;
@@ -165,7 +167,7 @@ public class MetricsReaderAgent implements MessageHandler, Agent {
 
   @Override
   public void onMessage(int msgTypeId, MutableDirectBuffer buffer, int index, int length) {
-    heartbeatTimeout.delay();
+    nextHeartbeatTimeout = epochClock.time() + retryInterval;
     headerDecoder.wrap(buffer, index);
     switch (headerDecoder.templateId()) {
       case HistogramDecoder.TEMPLATE_ID:
@@ -230,7 +232,7 @@ public class MetricsReaderAgent implements MessageHandler, Agent {
 
     State previous = state;
     if (previous != State.CLOSED) { // when it comes from onClose()
-      retryInterval.delay();
+      nextRetryTime = epochClock.time() + retryInterval;
       state(State.INIT);
     }
     return 1;

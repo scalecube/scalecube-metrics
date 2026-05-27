@@ -41,9 +41,10 @@ public class CountersReaderAgent implements Agent {
   private final File countersDir;
   private final boolean warnIfCountersNotExists;
   private final EpochClock epochClock;
+  private final long readInterval;
   private final CountersHandler countersHandler;
 
-  private final Delay readInterval;
+  private long nextReadTime;
   private final UnsafeBuffer headerBuffer = new UnsafeBuffer();
   private final KeyCodec keyCodec = new KeyCodec();
   private State state = State.CLOSED;
@@ -69,8 +70,8 @@ public class CountersReaderAgent implements Agent {
     this.countersDir = countersDir;
     this.warnIfCountersNotExists = warnIfCountersNotExists;
     this.epochClock = epochClock;
+    this.readInterval = readInterval.toMillis();
     this.countersHandler = countersHandler;
-    this.readInterval = new Delay(epochClock, readInterval.toMillis());
   }
 
   @Override
@@ -101,11 +102,12 @@ public class CountersReaderAgent implements Agent {
   }
 
   private int readCounters() {
-    if (readInterval.isNotOverdue()) {
+    final var now = epochClock.time();
+    if (now < nextReadTime) {
       return 0;
+    } else {
+      nextReadTime = now + readInterval;
     }
-
-    readInterval.delay();
 
     final var countersFile = new File(countersDir, COUNTERS_FILE);
     if (!countersFile.exists()) {
@@ -132,7 +134,7 @@ public class CountersReaderAgent implements Agent {
               LayoutDescriptor.createCountersMetaDataBuffer(countersByteBuffer, headerBuffer),
               LayoutDescriptor.createCountersValuesBuffer(countersByteBuffer, headerBuffer));
 
-      countersHandler.accept(epochClock.time(), readCounters(countersReader));
+      countersHandler.accept(now, readCounters(countersReader));
     } finally {
       BufferUtil.free(countersByteBuffer);
     }
@@ -228,7 +230,6 @@ public class CountersReaderAgent implements Agent {
   private int cleanup() {
     State previous = state;
     if (previous != State.CLOSED) { // when it comes from onClose()
-      readInterval.delay();
       state(State.READ_COUNTERS);
     }
     return 1;
