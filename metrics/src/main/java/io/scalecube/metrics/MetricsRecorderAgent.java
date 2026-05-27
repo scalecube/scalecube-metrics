@@ -117,15 +117,22 @@ class MetricsRecorderAgent implements Agent {
       for (int i = 0; i < list.size(); i++) {
         ((HistogramRecorder) list.get(i)).swapAndUpdate(agg);
       }
-      agg.publish(time);
-      schedule(keyBuffer, agg.resolutionMs());
+      try {
+        agg.publish(time);
+      } finally {
+        schedule(keyBuffer, agg.resolutionMs());
+      }
     }
+
     if (aggregate instanceof TpsAggregate agg) {
       for (int i = 0; i < list.size(); i++) {
         ((TpsRecorder) list.get(i)).swapAndUpdate(agg);
       }
-      agg.publish(time);
-      schedule(keyBuffer, TPS_RESOLUTION);
+      try {
+        agg.publish(time);
+      } finally {
+        schedule(keyBuffer, TPS_RESOLUTION);
+      }
     }
 
     return true;

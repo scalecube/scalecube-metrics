@@ -6,8 +6,6 @@ import org.agrona.DirectBuffer;
 /**
  * Callback interface for handling metrics (histograms, tps values). Being used as part of metric
  * processing functionality.
- *
- * @see MetricsReader
  */
 public interface MetricsHandler {
 

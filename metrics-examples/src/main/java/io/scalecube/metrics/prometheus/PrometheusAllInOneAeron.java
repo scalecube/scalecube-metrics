@@ -237,7 +237,7 @@ public class PrometheusAllInOneAeron {
         bufferClaim.commit();
       }
 
-      Thread.sleep(1);
+      Thread.yield();
     }
   }
 
