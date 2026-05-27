@@ -45,7 +45,7 @@ public class CncCountersReaderAgent implements Agent {
   private final long readInterval;
   private final CountersHandler countersHandler;
 
-  private long lastReadInterval;
+  private long nextReadTime;
   private final Int2ObjectHashMap<KeyConverter> keyConverters = new Int2ObjectHashMap<>();
   private State state = State.CLOSED;
 
@@ -106,10 +106,10 @@ public class CncCountersReaderAgent implements Agent {
 
   private int readCounters() {
     final var now = epochClock.time();
-    if (lastReadInterval + readInterval > now) {
+    if (now < nextReadTime) {
       return 0;
     } else {
-      lastReadInterval = now;
+      nextReadTime = now + readInterval;
     }
 
     final var cncFile = new File(aeronDirectoryName, CNC_FILE);

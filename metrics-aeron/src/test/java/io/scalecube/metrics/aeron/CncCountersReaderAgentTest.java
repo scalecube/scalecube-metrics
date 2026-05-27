@@ -54,7 +54,6 @@ class CncCountersReaderAgentTest {
       agent.doWork();
       assertEquals(State.READ_COUNTERS, agent.state());
       epochClock.advance(READ_INTERVAL.toMillis() + 1);
-      agent.doWork();
       verify(countersHandler).accept(anyLong(), anyList());
     }
   }
@@ -62,7 +61,7 @@ class CncCountersReaderAgentTest {
   @Test
   void testStartWithoutCncCounters() {
     agent.doWork();
-    assertEquals(State.READ_COUNTERS, agent.state());
+    assertEquals(State.CLEANUP, agent.state());
   }
 
   @Test

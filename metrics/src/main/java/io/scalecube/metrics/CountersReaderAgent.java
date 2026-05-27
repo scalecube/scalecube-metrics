@@ -44,7 +44,7 @@ public class CountersReaderAgent implements Agent {
   private final long readInterval;
   private final CountersHandler countersHandler;
 
-  private long lastReadInterval;
+  private long nextReadTime;
   private final UnsafeBuffer headerBuffer = new UnsafeBuffer();
   private final KeyCodec keyCodec = new KeyCodec();
   private State state = State.CLOSED;
@@ -103,10 +103,10 @@ public class CountersReaderAgent implements Agent {
 
   private int readCounters() {
     final var now = epochClock.time();
-    if (lastReadInterval + readInterval > now) {
+    if (now < nextReadTime) {
       return 0;
     } else {
-      lastReadInterval = now;
+      nextReadTime = now + readInterval;
     }
 
     final var countersFile = new File(countersDir, COUNTERS_FILE);
