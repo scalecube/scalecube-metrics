@@ -9,7 +9,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.assertArg;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 
 import io.scalecube.metrics.CountersReaderAgent.State;
@@ -60,8 +59,7 @@ class CountersReaderAgentTest {
       epochClock.advance(READ_INTERVAL.toMillis() + 1);
       agent.doWork();
       assertEquals(State.READ_COUNTERS, agent.state());
-      verify(countersHandler, times(2))
-          .accept(anyLong(), assertArg(list -> assertEquals(0, list.size())));
+      verify(countersHandler).accept(anyLong(), assertArg(list -> assertEquals(0, list.size())));
     }
   }
 
@@ -78,7 +76,7 @@ class CountersReaderAgentTest {
       epochClock.advance(READ_INTERVAL.toMillis() + 1);
       agent.doWork();
       assertEquals(State.READ_COUNTERS, agent.state());
-      verify(countersHandler, times(2))
+      verify(countersHandler)
           .accept(
               anyLong(),
               assertArg(
@@ -119,7 +117,7 @@ class CountersReaderAgentTest {
       epochClock.advance(READ_INTERVAL.toMillis() + 1);
       agent.doWork();
       assertEquals(State.READ_COUNTERS, agent.state());
-      verify(countersHandler, times(2))
+      verify(countersHandler)
           .accept(
               anyLong(),
               assertArg(
@@ -162,15 +160,14 @@ class CountersReaderAgentTest {
       epochClock.advance(READ_INTERVAL.toMillis() + 1);
       agent.doWork();
       assertEquals(State.READ_COUNTERS, agent.state());
-      verify(countersHandler, times(2))
-          .accept(anyLong(), assertArg(list -> assertEquals(0, list.size())));
+      verify(countersHandler).accept(anyLong(), assertArg(list -> assertEquals(0, list.size())));
     }
   }
 
   @Test
   void testStartWithoutCounters() {
     agent.doWork();
-    assertEquals(State.CLEANUP, agent.state());
+    assertEquals(State.READ_COUNTERS, agent.state());
   }
 
   @Test

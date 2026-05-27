@@ -10,7 +10,6 @@ import static org.agrona.IoUtil.mapExistingFile;
 import io.aeron.CncFileDescriptor;
 import io.scalecube.metrics.CounterDescriptor;
 import io.scalecube.metrics.CountersHandler;
-import io.scalecube.metrics.Delay;
 import java.io.File;
 import java.nio.channels.FileChannel.MapMode;
 import java.time.Duration;
@@ -43,9 +42,10 @@ public class CncCountersReaderAgent implements Agent {
   private final String aeronDirectoryName;
   private final boolean warnIfCncNotExists;
   private final EpochClock epochClock;
+  private final long readInterval;
   private final CountersHandler countersHandler;
 
-  private final Delay readInterval;
+  private long lastReadInterval;
   private final Int2ObjectHashMap<KeyConverter> keyConverters = new Int2ObjectHashMap<>();
   private State state = State.CLOSED;
 
@@ -70,8 +70,8 @@ public class CncCountersReaderAgent implements Agent {
     this.aeronDirectoryName = aeronDirectoryName;
     this.warnIfCncNotExists = warnIfCncNotExists;
     this.epochClock = epochClock;
+    this.readInterval = readInterval.toMillis();
     this.countersHandler = countersHandler;
-    this.readInterval = new Delay(epochClock, readInterval.toMillis());
     ArchiveCountersAdapter.populate(keyConverters);
     ClusterCountersAdapter.populate(keyConverters);
     ClusteredServiceCountersAdapter.populate(keyConverters);
@@ -105,11 +105,12 @@ public class CncCountersReaderAgent implements Agent {
   }
 
   private int readCounters() {
-    if (readInterval.isNotOverdue()) {
+    final var now = epochClock.time();
+    if (lastReadInterval + readInterval > now) {
       return 0;
+    } else {
+      lastReadInterval = now;
     }
-
-    readInterval.delay();
 
     final var cncFile = new File(aeronDirectoryName, CNC_FILE);
     if (!cncFile.exists()) {
@@ -128,7 +129,7 @@ public class CncCountersReaderAgent implements Agent {
               createCountersMetaDataBuffer(cncByteBuffer, cncMetaData),
               createCountersValuesBuffer(cncByteBuffer, cncMetaData),
               US_ASCII);
-      countersHandler.accept(epochClock.time(), readCounters(countersReader));
+      countersHandler.accept(now, readCounters(countersReader));
     } finally {
       BufferUtil.free(cncByteBuffer);
     }
@@ -159,7 +160,6 @@ public class CncCountersReaderAgent implements Agent {
   private int cleanup() {
     State previous = state;
     if (previous != State.CLOSED) { // when it comes from onClose()
-      readInterval.delay();
       state(State.READ_COUNTERS);
     }
     return 1;
