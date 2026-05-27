@@ -26,7 +26,8 @@ public class JvmMetricsAgent implements Agent {
 
   private final Object2ObjectHashMap<String, AtomicCounter> gcCounters =
       new Object2ObjectHashMap<>();
-  private final Delay readInterval;
+  private final EpochClock clock;
+  private final long updatePeriodMs;
   private final ThreadMXBean threadMxBean;
   private AtomicCounter memFree;
   private AtomicCounter memAllocated;
@@ -35,8 +36,9 @@ public class JvmMetricsAgent implements Agent {
   private AtomicCounter peakThreadCount;
   private AtomicCounter daemonThreadCount;
   private final CounterAllocator allocator;
-  private State state = State.CLOSED;
   private final boolean gcTelemetryEnabled;
+  private long nextUpdateTime;
+  private State state = State.CLOSED;
 
   /**
    * Publishes memory, thread and gc-related basic telemetry as counters. Counters have a source tag
@@ -55,7 +57,8 @@ public class JvmMetricsAgent implements Agent {
       Long updatePeriodMs,
       boolean enableGcTelemetry) {
     this.allocator = allocator;
-    this.readInterval = new Delay(clock, updatePeriodMs);
+    this.clock = clock;
+    this.updatePeriodMs = updatePeriodMs;
     this.threadMxBean = ManagementFactory.getThreadMXBean();
     this.gcTelemetryEnabled = enableGcTelemetry;
   }
@@ -118,17 +121,18 @@ public class JvmMetricsAgent implements Agent {
   }
 
   private int init() {
-    readInterval.delay();
+    nextUpdateTime = clock.time() + updatePeriodMs;
     state(State.RUNNING);
     return 1;
   }
 
   private int running() {
-    if (readInterval.isNotOverdue()) {
+    final long now = clock.time();
+    if (now < nextUpdateTime) {
       return 0;
+    } else {
+      nextUpdateTime = now + updatePeriodMs;
     }
-
-    readInterval.delay();
 
     final var runtime = Runtime.getRuntime();
     memFree.set(runtime.freeMemory());
@@ -169,7 +173,7 @@ public class JvmMetricsAgent implements Agent {
   private int cleanup() {
     State previous = state;
     if (previous != State.CLOSED) { // when it comes from onClose()
-      readInterval.delay();
+      nextUpdateTime = clock.time() + updatePeriodMs;
       state(State.INIT);
     }
     return 1;
