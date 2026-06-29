@@ -44,7 +44,7 @@ public class CountersPrometheusAdapter implements CountersHandler, PrometheusWri
 
   @Override
   public void write(OutputStreamWriter writer) throws IOException {
-    final var counterDescriptors = counterDescriptorsReference.getAndSet(null);
+    final var counterDescriptors = counterDescriptorsReference.get();
     if (counterDescriptors == null) {
       return;
     }
