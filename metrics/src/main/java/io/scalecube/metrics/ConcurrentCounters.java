@@ -8,6 +8,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
 import org.agrona.DirectBuffer;
 import org.agrona.ExpandableArrayBuffer;
+import org.agrona.concurrent.UnsafeBuffer;
 import org.agrona.concurrent.status.AtomicCounter;
 import org.agrona.concurrent.status.CountersManager;
 
@@ -25,6 +26,8 @@ public class ConcurrentCounters {
       ThreadLocal.withInitial(ExpandableArrayBuffer::new);
   private final ThreadLocal<KeyFlyweight> keyFlyweightHolder =
       ThreadLocal.withInitial(KeyFlyweight::new);
+  private final ThreadLocal<UnsafeBuffer> keyViewHolder =
+      ThreadLocal.withInitial(UnsafeBuffer::new);
   private final Map<DirectBuffer, AtomicCounter> counters = new ConcurrentHashMap<>();
 
   public ConcurrentCounters(CountersManager countersManager) {
@@ -63,7 +66,16 @@ public class ConcurrentCounters {
       consumer.accept(keyFlyweight.wrap(buffer, offset));
     }
 
-    var counter = counters.get(buffer);
+    // The cache key is the exact key bytes [0, keyLength) written into the (reused, over-sized)
+    // ThreadLocal buffer. Agrona buffer equals/hashCode compare over the whole capacity, so the
+    // lookup and the stored key must both be sized exactly to keyLength; otherwise stale trailing
+    // bytes (or a differing capacity) cause the lookup to miss and a duplicate counter slot to be
+    // allocated for an already-registered key.
+    final var keyLength = offset + keyFlyweight.length();
+    final var keyView = keyViewHolder.get();
+    keyView.wrap(buffer, 0, keyLength);
+
+    var counter = counters.get(keyView);
     if (counter != null) {
       return counter;
     }
@@ -81,8 +93,8 @@ public class ConcurrentCounters {
             0,
             nameLength);
 
-    final var keyBuffer = new ExpandableArrayBuffer();
-    keyBuffer.putBytes(0, buffer, 0, offset + keyFlyweight.length());
+    final var keyBuffer = new UnsafeBuffer(new byte[keyLength]);
+    keyBuffer.putBytes(0, buffer, 0, keyLength);
     counters.put(keyBuffer, counter);
 
     return counter;

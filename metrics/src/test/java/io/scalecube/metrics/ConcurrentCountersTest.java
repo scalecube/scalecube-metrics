@@ -4,8 +4,11 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.function.Consumer;
 import org.agrona.CloseHelper;
+import org.agrona.concurrent.status.AtomicCounter;
 import org.agrona.concurrent.status.CountersManager;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -64,6 +67,59 @@ class ConcurrentCountersTest {
     var differentCounter =
         concurrentCounters.counter("key-counter", key -> key.tagsCount(1).intValue("k", 43));
     assertNotSame(counter, differentCounter, "Different key attributes should create new counter");
+  }
+
+  @Test
+  void shouldReturnSameCounterAfterInterveningLongerKey() {
+    // Re-requesting the same (name, key) must always return the cached counter, even when a
+    // counter with a longer key was allocated on the same thread in between. The lookup reuses a
+    // shared, growing ThreadLocal buffer; the intervening longer key leaves stale trailing bytes
+    // (and may grow capacity), so a key-identity that compares over full buffer capacity would
+    // miss the cache and leak a new counter slot with an identical visible key.
+    var first = concurrentCounters.counter("agent_state", agentKey("IndicativePriceAgent", 30));
+
+    // Intervening allocation with a strictly longer name and tag value on the same thread.
+    concurrentCounters.counter(
+        "agent_stream_position_total", agentKey("MarketDataReplayAgentWithLongerRoleName", 30));
+
+    var second = concurrentCounters.counter("agent_state", agentKey("IndicativePriceAgent", 30));
+
+    assertSame(
+        first,
+        second,
+        "Re-requesting the same name and key must return the cached counter, not a new slot");
+  }
+
+  @Test
+  void shouldNotLeakCountersWhenSameKeyRequestedRepeatedly() {
+    // Mirrors ScalecubeBridge.catalogueWriterAgent re-requesting agent_* counters on every
+    // onClusterFound: the same logical metric must map to exactly one allocated counter slot.
+    final var beforeCount = countersManager.maxCounterId();
+
+    AtomicCounter previous = null;
+    for (int event = 0; event < 5; event++) {
+      // A different, longer key is touched first on this thread each iteration (as happens in
+      // real allocation sequences), then the target counter is (re-)requested.
+      concurrentCounters.counter("agent_error_total", agentKey("MarketDataReplayAgent", 30));
+
+      var current = concurrentCounters.counter("agent_state", agentKey("IndicativePriceAgent", 30));
+
+      if (previous != null) {
+        assertSame(previous, current, "Every re-request must yield the same counter instance");
+      }
+      previous = current;
+    }
+
+    // Two distinct logical counters (agent_error_total + agent_state) means at most two new slots,
+    // regardless of how many times they were requested.
+    assertTrue(
+        countersManager.maxCounterId() - beforeCount <= 2,
+        "Repeated requests for the same keys must not allocate additional counter slots");
+  }
+
+  private static Consumer<KeyFlyweight> agentKey(String roleName, int clusterId) {
+    return key ->
+        key.tagsCount(2).stringValue("roleName", roleName).intValue("clusterId", clusterId);
   }
 
   @Test
