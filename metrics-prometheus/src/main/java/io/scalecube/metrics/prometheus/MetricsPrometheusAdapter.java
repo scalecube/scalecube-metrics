@@ -101,14 +101,14 @@ public class MetricsPrometheusAdapter implements MetricsHandler, PrometheusWrite
 
   @Override
   public void write(OutputStreamWriter writer) throws IOException {
-    final var histogramMap = histogramMapReference.getAndSet(null);
+    final var histogramMap = histogramMapReference.get();
     if (histogramMap != null) {
       for (var histogramItem : histogramMap.values()) {
         writeHistogram(writer, histogramItem);
       }
     }
 
-    final var tpsMap = tpsMapReference.getAndSet(null);
+    final var tpsMap = tpsMapReference.get();
     if (tpsMap != null) {
       for (var tpsItem : tpsMap.values()) {
         writeTps(writer, tpsItem);
