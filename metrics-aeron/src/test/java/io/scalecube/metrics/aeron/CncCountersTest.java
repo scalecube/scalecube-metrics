@@ -31,6 +31,7 @@ import static io.aeron.cluster.ConsensusModule.Configuration.COMMIT_POSITION_TYP
 import static io.aeron.cluster.ConsensusModule.Configuration.CONSENSUS_MODULE_ERROR_COUNT_TYPE_ID;
 import static io.aeron.cluster.ConsensusModule.Configuration.CONSENSUS_MODULE_STATE_TYPE_ID;
 import static io.aeron.cluster.ConsensusModule.Configuration.ELECTION_STATE_TYPE_ID;
+import static io.aeron.cluster.ConsensusModule.Configuration.SNAPSHOT_COUNTER_TYPE_ID;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -342,6 +343,11 @@ public class CncCountersTest {
         arguments(
             "Counter TypeId: " + CLUSTER_CYCLE_TIME_THRESHOLD_EXCEEDED_TYPE_ID,
             clusterCounterKey("cluster_cycle_time_threshold_exceeded_count", CLUSTER_ID)));
+
+    builder.add(
+        arguments(
+            "Counter TypeId: " + SNAPSHOT_COUNTER_TYPE_ID,
+            clusterCounterKey("cluster_snapshot_count", CLUSTER_ID)));
 
     builder.add(
         arguments(
