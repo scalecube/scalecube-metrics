@@ -12,6 +12,7 @@ import static io.aeron.cluster.ConsensusModule.Configuration.COMMIT_POSITION_TYP
 import static io.aeron.cluster.ConsensusModule.Configuration.CONSENSUS_MODULE_ERROR_COUNT_TYPE_ID;
 import static io.aeron.cluster.ConsensusModule.Configuration.CONSENSUS_MODULE_STATE_TYPE_ID;
 import static io.aeron.cluster.ConsensusModule.Configuration.ELECTION_STATE_TYPE_ID;
+import static io.aeron.cluster.ConsensusModule.Configuration.SNAPSHOT_COUNTER_TYPE_ID;
 
 import io.scalecube.metrics.KeyFlyweight;
 import org.agrona.DirectBuffer;
@@ -36,6 +37,7 @@ public class ClusterCountersAdapter {
     map.put(
         CLUSTER_CYCLE_TIME_THRESHOLD_EXCEEDED_TYPE_ID,
         adapter::clusterCycleTimeThresholdExceededCount);
+    map.put(SNAPSHOT_COUNTER_TYPE_ID, adapter::clusterSnapshotCount);
     map.put(CLUSTER_TOTAL_MAX_SNAPSHOT_DURATION_TYPE_ID, adapter::clusterTotalMaxSnapshotDuration);
     map.put(
         CLUSTER_TOTAL_SNAPSHOT_DURATION_THRESHOLD_EXCEEDED_TYPE_ID,
@@ -81,6 +83,10 @@ public class ClusterCountersAdapter {
   private DirectBuffer clusterCycleTimeThresholdExceededCount(
       DirectBuffer keyBuffer, String label) {
     return newKey("cluster_cycle_time_threshold_exceeded_count", keyBuffer.getInt(0));
+  }
+
+  private DirectBuffer clusterSnapshotCount(DirectBuffer keyBuffer, String label) {
+    return newKey("cluster_snapshot_count", keyBuffer.getInt(0));
   }
 
   private DirectBuffer clusterTotalMaxSnapshotDuration(DirectBuffer keyBuffer, String label) {
