@@ -5,6 +5,7 @@ import static io.scalecube.metrics.CountersRegistry.Context.COUNTERS_VALUES_BUFF
 import static io.scalecube.metrics.CountersRegistry.Context.DIR_DELETE_ON_SHUTDOWN_PROP_NAME;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -27,6 +28,7 @@ import org.junit.jupiter.api.Test;
 
 class CountersRegistryTest {
 
+  private static final String NULL_VALUE = "@null";
   private static final int TYPE_ID = 100;
 
   private static final AtomicInteger INT_COUNTER = new AtomicInteger(1);
@@ -69,6 +71,38 @@ class CountersRegistryTest {
     assertEquals(countersDirectoryName, context.countersDirectoryName());
     assertEquals(countersValuesBufferLength, context.countersValuesBufferLength());
     assertEquals(dirDeleteOnShutdown, context.dirDeleteOnShutdown());
+  }
+
+  @Test
+  void testPopulateFromPropertiesWithNullMarker() {
+    // given
+    Properties props = new Properties();
+    props.setProperty(COUNTERS_DIR_NAME_PROP_NAME, NULL_VALUE);
+    props.setProperty(COUNTERS_VALUES_BUFFER_LENGTH_PROP_NAME, NULL_VALUE);
+    props.setProperty(DIR_DELETE_ON_SHUTDOWN_PROP_NAME, NULL_VALUE);
+
+    // when
+    CountersRegistry.Context context = new CountersRegistry.Context(props);
+
+    // then: @null must behave exactly as if the property was absent
+    CountersRegistry.Context expected = new CountersRegistry.Context(new Properties());
+    assertNull(context.countersDirectoryName(), "countersDirectoryName");
+    assertEquals(
+        expected.countersValuesBufferLength(),
+        context.countersValuesBufferLength(),
+        "countersValuesBufferLength");
+    assertEquals(
+        expected.dirDeleteOnShutdown(), context.dirDeleteOnShutdown(), "dirDeleteOnShutdown");
+  }
+
+  @Test
+  void testNullMarkerInSystemProperty() {
+    System.setProperty(COUNTERS_DIR_NAME_PROP_NAME, NULL_VALUE);
+    try {
+      assertNull(new CountersRegistry.Context().countersDirectoryName(), "countersDirectoryName");
+    } finally {
+      System.clearProperty(COUNTERS_DIR_NAME_PROP_NAME);
+    }
   }
 
   @Test

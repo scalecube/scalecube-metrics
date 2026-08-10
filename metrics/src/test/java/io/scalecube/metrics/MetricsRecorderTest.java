@@ -9,6 +9,7 @@ import static io.scalecube.metrics.MetricsRecorder.Context.METRICS_FILE;
 import static org.agrona.IoUtil.delete;
 import static org.agrona.IoUtil.mapExistingFile;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.scalecube.metrics.MetricsRecorder.Context;
@@ -31,6 +32,7 @@ import org.junit.jupiter.api.Test;
 
 class MetricsRecorderTest {
 
+  private static final String NULL_VALUE = "@null";
   private static final long OLD_START_TIMESTAMP = 10042;
   private static final long OLD_PID = 100500;
   private static final int OLD_BUFFER_LENGTH = 8 * 1024 * 1024;
@@ -73,6 +75,38 @@ class MetricsRecorderTest {
     assertEquals(dirDeleteOnShutdown, context.dirDeleteOnShutdown());
     assertEquals(metricsBufferLength, context.metricsBufferLength());
     assertEquals(idleStrategy, context.idleStrategy().getClass().getName());
+  }
+
+  @Test
+  void testPopulateFromPropertiesWithNullMarker() {
+    // given
+    Properties props = new Properties();
+    props.setProperty(METRICS_DIRECTORY_NAME_PROP_NAME, NULL_VALUE);
+    props.setProperty(DIR_DELETE_ON_SHUTDOWN_PROP_NAME, NULL_VALUE);
+    props.setProperty(METRICS_BUFFER_LENGTH_PROP_NAME, NULL_VALUE);
+    props.setProperty(IDLE_STRATEGY_PROP_NAME, NULL_VALUE);
+
+    // when
+    Context context = new Context(props);
+
+    // then: @null must behave exactly as if the property was absent
+    Context expected = new Context(new Properties());
+    assertNull(context.metricsDirectoryName(), "metricsDirectoryName");
+    assertNull(context.idleStrategy(), "idleStrategy");
+    assertEquals(
+        expected.dirDeleteOnShutdown(), context.dirDeleteOnShutdown(), "dirDeleteOnShutdown");
+    assertEquals(
+        expected.metricsBufferLength(), context.metricsBufferLength(), "metricsBufferLength");
+  }
+
+  @Test
+  void testNullMarkerInSystemProperty() {
+    System.setProperty(METRICS_DIRECTORY_NAME_PROP_NAME, NULL_VALUE);
+    try {
+      assertNull(new Context().metricsDirectoryName(), "metricsDirectoryName");
+    } finally {
+      System.clearProperty(METRICS_DIRECTORY_NAME_PROP_NAME);
+    }
   }
 
   @Test
