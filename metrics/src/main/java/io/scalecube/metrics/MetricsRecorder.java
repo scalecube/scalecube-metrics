@@ -211,24 +211,31 @@ public class MetricsRecorder implements AutoCloseable {
     private volatile int isClosed;
 
     private File metricsDir;
-    private String metricsDirectoryName = System.getProperty(METRICS_DIRECTORY_NAME_PROP_NAME);
-    private boolean dirDeleteOnShutdown = Boolean.getBoolean(DIR_DELETE_ON_SHUTDOWN_PROP_NAME);
+    private String metricsDirectoryName;
+    private boolean dirDeleteOnShutdown;
     private EpochClock epochClock;
     private CachedEpochClock cachedEpochClock;
-    private int metricsBufferLength = Integer.getInteger(METRICS_BUFFER_LENGTH_PROP_NAME, 0);
+    private int metricsBufferLength;
     private MappedByteBuffer metricsByteBuffer;
     private BroadcastTransmitter metricsTransmitter;
     private boolean useAgentInvoker;
     private ErrorHandler errorHandler;
     private IdleStrategy idleStrategy;
 
-    public Context() {}
+    public Context() {
+      this(System.getProperties());
+    }
 
     public Context(Properties props) {
-      metricsDirectoryName(props.getProperty(METRICS_DIRECTORY_NAME_PROP_NAME));
-      dirDeleteOnShutdown(props.getProperty(DIR_DELETE_ON_SHUTDOWN_PROP_NAME));
-      metricsBufferLength(props.getProperty(METRICS_BUFFER_LENGTH_PROP_NAME));
-      idleStrategy(props.getProperty(IDLE_STRATEGY_PROP_NAME));
+      metricsDirectoryName(getProperty(props, METRICS_DIRECTORY_NAME_PROP_NAME));
+      dirDeleteOnShutdown(getProperty(props, DIR_DELETE_ON_SHUTDOWN_PROP_NAME));
+      metricsBufferLength(getProperty(props, METRICS_BUFFER_LENGTH_PROP_NAME));
+      idleStrategy(getProperty(props, IDLE_STRATEGY_PROP_NAME));
+    }
+
+    private static String getProperty(Properties props, String name) {
+      final var value = props.getProperty(name);
+      return "@null".equals(value) ? null : value;
     }
 
     private void conclude() {

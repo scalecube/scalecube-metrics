@@ -111,21 +111,27 @@ public class CountersRegistry implements AutoCloseable {
     private volatile int isConcluded;
     private volatile int isClosed;
 
-    private int countersValuesBufferLength =
-        Integer.getInteger(COUNTERS_VALUES_BUFFER_LENGTH_PROP_NAME, 0);
-    private String countersDirectoryName = System.getProperty(COUNTERS_DIR_NAME_PROP_NAME);
+    private int countersValuesBufferLength;
+    private String countersDirectoryName;
     private File countersDir;
-    private boolean dirDeleteOnShutdown = Boolean.getBoolean(DIR_DELETE_ON_SHUTDOWN_PROP_NAME);
+    private boolean dirDeleteOnShutdown;
     private MappedByteBuffer mappedByteBuffer;
     private UnsafeBuffer countersMetaDataBuffer;
     private UnsafeBuffer countersValuesBuffer;
 
-    public Context() {}
+    public Context() {
+      this(System.getProperties());
+    }
 
     public Context(Properties props) {
-      countersDirectoryName(props.getProperty(COUNTERS_DIR_NAME_PROP_NAME));
-      countersValuesBufferLength(props.getProperty(COUNTERS_VALUES_BUFFER_LENGTH_PROP_NAME));
-      dirDeleteOnShutdown(props.getProperty(DIR_DELETE_ON_SHUTDOWN_PROP_NAME));
+      countersDirectoryName(getProperty(props, COUNTERS_DIR_NAME_PROP_NAME));
+      countersValuesBufferLength(getProperty(props, COUNTERS_VALUES_BUFFER_LENGTH_PROP_NAME));
+      dirDeleteOnShutdown(getProperty(props, DIR_DELETE_ON_SHUTDOWN_PROP_NAME));
+    }
+
+    private static String getProperty(Properties props, String name) {
+      final var value = props.getProperty(name);
+      return "@null".equals(value) ? null : value;
     }
 
     private void conclude() {
