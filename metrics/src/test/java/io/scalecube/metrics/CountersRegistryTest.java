@@ -2,10 +2,10 @@ package io.scalecube.metrics;
 
 import static io.scalecube.metrics.CountersRegistry.Context.COUNTERS_DIR_NAME_PROP_NAME;
 import static io.scalecube.metrics.CountersRegistry.Context.COUNTERS_VALUES_BUFFER_LENGTH_PROP_NAME;
+import static io.scalecube.metrics.CountersRegistry.Context.DEFAULT_COUNTERS_DIR_NAME;
 import static io.scalecube.metrics.CountersRegistry.Context.DIR_DELETE_ON_SHUTDOWN_PROP_NAME;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -86,7 +86,8 @@ class CountersRegistryTest {
 
     // then: @null must behave exactly as if the property was absent
     CountersRegistry.Context expected = new CountersRegistry.Context(new Properties());
-    assertNull(context.countersDirectoryName(), "countersDirectoryName");
+    assertEquals(
+        expected.countersDirectoryName(), context.countersDirectoryName(), "countersDirectoryName");
     assertEquals(
         expected.countersValuesBufferLength(),
         context.countersValuesBufferLength(),
@@ -99,7 +100,10 @@ class CountersRegistryTest {
   void testNullMarkerInSystemProperty() {
     System.setProperty(COUNTERS_DIR_NAME_PROP_NAME, NULL_VALUE);
     try {
-      assertNull(new CountersRegistry.Context().countersDirectoryName(), "countersDirectoryName");
+      assertEquals(
+          DEFAULT_COUNTERS_DIR_NAME,
+          new CountersRegistry.Context().countersDirectoryName(),
+          "countersDirectoryName");
     } finally {
       System.clearProperty(COUNTERS_DIR_NAME_PROP_NAME);
     }

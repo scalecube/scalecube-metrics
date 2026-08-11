@@ -124,14 +124,29 @@ public class CountersRegistry implements AutoCloseable {
     }
 
     public Context(Properties props) {
-      countersDirectoryName(getProperty(props, COUNTERS_DIR_NAME_PROP_NAME));
-      countersValuesBufferLength(getProperty(props, COUNTERS_VALUES_BUFFER_LENGTH_PROP_NAME));
-      dirDeleteOnShutdown(getProperty(props, DIR_DELETE_ON_SHUTDOWN_PROP_NAME));
+      countersDirectoryName(props);
+      countersValuesBufferLength(props);
+      dirDeleteOnShutdown(props);
     }
 
     private static String getProperty(Properties props, String name) {
       final var value = props.getProperty(name);
       return "@null".equals(value) ? null : value;
+    }
+
+    private static String getProperty(Properties props, String name, String defaultValue) {
+      final var value = getProperty(props, name);
+      return value != null ? value : defaultValue;
+    }
+
+    private static int getProperty(Properties props, String name, int defaultValue) {
+      final var value = getProperty(props, name);
+      return value != null ? Integer.parseInt(value) : defaultValue;
+    }
+
+    private static boolean getProperty(Properties props, String name, boolean defaultValue) {
+      final var value = getProperty(props, name);
+      return value != null ? Boolean.parseBoolean(value) : defaultValue;
     }
 
     private void conclude() {
@@ -144,10 +159,6 @@ public class CountersRegistry implements AutoCloseable {
     }
 
     private void concludeCountersDirectory() {
-      if (countersDirectoryName == null) {
-        countersDirectoryName = DEFAULT_COUNTERS_DIR_NAME;
-      }
-
       if (countersDir == null) {
         try {
           countersDir = new File(countersDirectoryName).getCanonicalFile();
@@ -164,10 +175,6 @@ public class CountersRegistry implements AutoCloseable {
     }
 
     private void concludeCountersBuffers() {
-      if (countersValuesBufferLength == 0) {
-        countersValuesBufferLength = DEFAULT_COUNTERS_VALUES_BUFFER_LENGTH;
-      }
-
       final var min = DEFAULT_COUNTERS_VALUES_BUFFER_LENGTH;
       if (countersValuesBufferLength < min) {
         throw new IllegalArgumentException("countersValuesBufferLength must be at least " + min);
@@ -203,11 +210,12 @@ public class CountersRegistry implements AutoCloseable {
       return this;
     }
 
-    public Context countersValuesBufferLength(String countersValuesBufferLength) {
-      if (countersValuesBufferLength != null) {
-        return countersValuesBufferLength(Integer.parseInt(countersValuesBufferLength));
-      }
-      return this;
+    public Context countersValuesBufferLength(Properties props) {
+      return countersValuesBufferLength(
+          getProperty(
+              props,
+              COUNTERS_VALUES_BUFFER_LENGTH_PROP_NAME,
+              DEFAULT_COUNTERS_VALUES_BUFFER_LENGTH));
     }
 
     public String countersDirectoryName() {
@@ -217,6 +225,11 @@ public class CountersRegistry implements AutoCloseable {
     public Context countersDirectoryName(String countersDirectoryName) {
       this.countersDirectoryName = countersDirectoryName;
       return this;
+    }
+
+    public Context countersDirectoryName(Properties props) {
+      return countersDirectoryName(
+          getProperty(props, COUNTERS_DIR_NAME_PROP_NAME, DEFAULT_COUNTERS_DIR_NAME));
     }
 
     public File countersDir() {
@@ -237,11 +250,8 @@ public class CountersRegistry implements AutoCloseable {
       return this;
     }
 
-    public Context dirDeleteOnShutdown(String dirDeleteOnShutdown) {
-      if (dirDeleteOnShutdown != null) {
-        return dirDeleteOnShutdown(Boolean.parseBoolean(dirDeleteOnShutdown));
-      }
-      return this;
+    public Context dirDeleteOnShutdown(Properties props) {
+      return dirDeleteOnShutdown(getProperty(props, DIR_DELETE_ON_SHUTDOWN_PROP_NAME, false));
     }
 
     UnsafeBuffer countersMetaDataBuffer() {

@@ -184,6 +184,7 @@ public class MetricsRecorder implements AutoCloseable {
     public static final String METRICS_FILE = "metrics.dat";
     public static final String DEFAULT_METRICS_DIR_NAME;
     public static final int DEFAULT_METRICS_BUFFER_LENGTH = 8 * 1024 * 1024;
+    public static final String DEFAULT_IDLE_STRATEGY = BackoffIdleStrategy.class.getName();
 
     static {
       String baseDirName = null;
@@ -227,15 +228,30 @@ public class MetricsRecorder implements AutoCloseable {
     }
 
     public Context(Properties props) {
-      metricsDirectoryName(getProperty(props, METRICS_DIRECTORY_NAME_PROP_NAME));
-      dirDeleteOnShutdown(getProperty(props, DIR_DELETE_ON_SHUTDOWN_PROP_NAME));
-      metricsBufferLength(getProperty(props, METRICS_BUFFER_LENGTH_PROP_NAME));
-      idleStrategy(getProperty(props, IDLE_STRATEGY_PROP_NAME));
+      metricsDirectoryName(props);
+      dirDeleteOnShutdown(props);
+      metricsBufferLength(props);
+      idleStrategy(props);
     }
 
     private static String getProperty(Properties props, String name) {
       final var value = props.getProperty(name);
       return "@null".equals(value) ? null : value;
+    }
+
+    private static String getProperty(Properties props, String name, String defaultValue) {
+      final var value = getProperty(props, name);
+      return value != null ? value : defaultValue;
+    }
+
+    private static int getProperty(Properties props, String name, int defaultValue) {
+      final var value = getProperty(props, name);
+      return value != null ? Integer.parseInt(value) : defaultValue;
+    }
+
+    private static boolean getProperty(Properties props, String name, boolean defaultValue) {
+      final var value = getProperty(props, name);
+      return value != null ? Boolean.parseBoolean(value) : defaultValue;
     }
 
     private void conclude() {
@@ -257,17 +273,9 @@ public class MetricsRecorder implements AutoCloseable {
       if (errorHandler == null) {
         errorHandler = ex -> LOGGER.error("Exception occurred", ex);
       }
-
-      if (idleStrategy == null) {
-        idleStrategy = new BackoffIdleStrategy();
-      }
     }
 
     private void concludeMetricsDirectory() {
-      if (metricsDirectoryName == null) {
-        metricsDirectoryName = DEFAULT_METRICS_DIR_NAME;
-      }
-
       if (metricsDir == null) {
         try {
           metricsDir = new File(metricsDirectoryName).getCanonicalFile();
@@ -284,10 +292,6 @@ public class MetricsRecorder implements AutoCloseable {
     }
 
     private void concludeMetricsBuffer() {
-      if (metricsBufferLength == 0) {
-        metricsBufferLength = DEFAULT_METRICS_BUFFER_LENGTH;
-      }
-
       final var min = DEFAULT_METRICS_BUFFER_LENGTH;
       if (metricsBufferLength < min) {
         throw new IllegalArgumentException("metricsBufferLength must be at least " + min);
@@ -335,6 +339,11 @@ public class MetricsRecorder implements AutoCloseable {
       return this;
     }
 
+    public Context metricsDirectoryName(Properties props) {
+      return metricsDirectoryName(
+          getProperty(props, METRICS_DIRECTORY_NAME_PROP_NAME, DEFAULT_METRICS_DIR_NAME));
+    }
+
     public boolean dirDeleteOnShutdown() {
       return dirDeleteOnShutdown;
     }
@@ -344,11 +353,8 @@ public class MetricsRecorder implements AutoCloseable {
       return this;
     }
 
-    public Context dirDeleteOnShutdown(String dirDeleteOnShutdown) {
-      if (dirDeleteOnShutdown != null) {
-        return dirDeleteOnShutdown(Boolean.parseBoolean(dirDeleteOnShutdown));
-      }
-      return this;
+    public Context dirDeleteOnShutdown(Properties props) {
+      return dirDeleteOnShutdown(getProperty(props, DIR_DELETE_ON_SHUTDOWN_PROP_NAME, false));
     }
 
     public EpochClock epochClock() {
@@ -378,11 +384,9 @@ public class MetricsRecorder implements AutoCloseable {
       return this;
     }
 
-    public Context metricsBufferLength(String metricsBufferLength) {
-      if (metricsBufferLength != null) {
-        return metricsBufferLength(Integer.parseInt(metricsBufferLength));
-      }
-      return this;
+    public Context metricsBufferLength(Properties props) {
+      return metricsBufferLength(
+          getProperty(props, METRICS_BUFFER_LENGTH_PROP_NAME, DEFAULT_METRICS_BUFFER_LENGTH));
     }
 
     public boolean useAgentInvoker() {
@@ -418,6 +422,10 @@ public class MetricsRecorder implements AutoCloseable {
         }
       }
       return this;
+    }
+
+    public Context idleStrategy(Properties props) {
+      return idleStrategy(getProperty(props, IDLE_STRATEGY_PROP_NAME, DEFAULT_IDLE_STRATEGY));
     }
 
     public IdleStrategy idleStrategy() {
