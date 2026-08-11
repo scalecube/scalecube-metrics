@@ -123,29 +123,29 @@ public class CountersRegistry implements AutoCloseable {
       this(System.getProperties());
     }
 
-    public Context(Properties props) {
-      countersDirectoryName(props);
-      countersValuesBufferLength(props);
-      dirDeleteOnShutdown(props);
+    public Context(Properties properties) {
+      countersDirectoryName(properties);
+      countersValuesBufferLength(properties);
+      dirDeleteOnShutdown(properties);
     }
 
-    private static String getProperty(Properties props, String name) {
-      final var value = props.getProperty(name);
+    private static String getProperty(Properties properties, String name) {
+      final var value = properties.getProperty(name);
       return "@null".equals(value) ? null : value;
     }
 
-    private static String getProperty(Properties props, String name, String defaultValue) {
-      final var value = getProperty(props, name);
+    private static String getProperty(Properties properties, String name, String defaultValue) {
+      final var value = getProperty(properties, name);
       return value != null ? value : defaultValue;
     }
 
-    private static int getProperty(Properties props, String name, int defaultValue) {
-      final var value = getProperty(props, name);
+    private static int getProperty(Properties properties, String name, int defaultValue) {
+      final var value = getProperty(properties, name);
       return value != null ? Integer.parseInt(value) : defaultValue;
     }
 
-    private static boolean getProperty(Properties props, String name, boolean defaultValue) {
-      final var value = getProperty(props, name);
+    private static boolean getProperty(Properties properties, String name, boolean defaultValue) {
+      final var value = getProperty(properties, name);
       return value != null ? Boolean.parseBoolean(value) : defaultValue;
     }
 
@@ -210,10 +210,10 @@ public class CountersRegistry implements AutoCloseable {
       return this;
     }
 
-    public Context countersValuesBufferLength(Properties props) {
+    public Context countersValuesBufferLength(Properties properties) {
       return countersValuesBufferLength(
           getProperty(
-              props,
+              properties,
               COUNTERS_VALUES_BUFFER_LENGTH_PROP_NAME,
               DEFAULT_COUNTERS_VALUES_BUFFER_LENGTH));
     }
@@ -227,9 +227,9 @@ public class CountersRegistry implements AutoCloseable {
       return this;
     }
 
-    public Context countersDirectoryName(Properties props) {
+    public Context countersDirectoryName(Properties properties) {
       return countersDirectoryName(
-          getProperty(props, COUNTERS_DIR_NAME_PROP_NAME, DEFAULT_COUNTERS_DIR_NAME));
+          getProperty(properties, COUNTERS_DIR_NAME_PROP_NAME, DEFAULT_COUNTERS_DIR_NAME));
     }
 
     public File countersDir() {
@@ -250,8 +250,8 @@ public class CountersRegistry implements AutoCloseable {
       return this;
     }
 
-    public Context dirDeleteOnShutdown(Properties props) {
-      return dirDeleteOnShutdown(getProperty(props, DIR_DELETE_ON_SHUTDOWN_PROP_NAME, false));
+    public Context dirDeleteOnShutdown(Properties properties) {
+      return dirDeleteOnShutdown(getProperty(properties, DIR_DELETE_ON_SHUTDOWN_PROP_NAME, false));
     }
 
     UnsafeBuffer countersMetaDataBuffer() {

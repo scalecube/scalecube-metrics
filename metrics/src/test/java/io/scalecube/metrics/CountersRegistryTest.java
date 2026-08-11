@@ -58,14 +58,14 @@ class CountersRegistryTest {
     final var countersValuesBufferLength = nextLong();
     final var dirDeleteOnShutdown = nextBoolean();
 
-    Properties props = new Properties();
-    props.setProperty(COUNTERS_DIR_NAME_PROP_NAME, countersDirectoryName);
-    props.setProperty(
+    Properties properties = new Properties();
+    properties.setProperty(COUNTERS_DIR_NAME_PROP_NAME, countersDirectoryName);
+    properties.setProperty(
         COUNTERS_VALUES_BUFFER_LENGTH_PROP_NAME, String.valueOf(countersValuesBufferLength));
-    props.setProperty(DIR_DELETE_ON_SHUTDOWN_PROP_NAME, String.valueOf(dirDeleteOnShutdown));
+    properties.setProperty(DIR_DELETE_ON_SHUTDOWN_PROP_NAME, String.valueOf(dirDeleteOnShutdown));
 
     // when
-    CountersRegistry.Context context = new CountersRegistry.Context(props);
+    CountersRegistry.Context context = new CountersRegistry.Context(properties);
 
     // then
     assertEquals(countersDirectoryName, context.countersDirectoryName());
@@ -76,13 +76,13 @@ class CountersRegistryTest {
   @Test
   void testPopulateFromPropertiesWithNullMarker() {
     // given
-    Properties props = new Properties();
-    props.setProperty(COUNTERS_DIR_NAME_PROP_NAME, NULL_VALUE);
-    props.setProperty(COUNTERS_VALUES_BUFFER_LENGTH_PROP_NAME, NULL_VALUE);
-    props.setProperty(DIR_DELETE_ON_SHUTDOWN_PROP_NAME, NULL_VALUE);
+    Properties properties = new Properties();
+    properties.setProperty(COUNTERS_DIR_NAME_PROP_NAME, NULL_VALUE);
+    properties.setProperty(COUNTERS_VALUES_BUFFER_LENGTH_PROP_NAME, NULL_VALUE);
+    properties.setProperty(DIR_DELETE_ON_SHUTDOWN_PROP_NAME, NULL_VALUE);
 
     // when
-    CountersRegistry.Context context = new CountersRegistry.Context(props);
+    CountersRegistry.Context context = new CountersRegistry.Context(properties);
 
     // then: @null must behave exactly as if the property was absent
     CountersRegistry.Context expected = new CountersRegistry.Context(new Properties());
