@@ -9,7 +9,6 @@ import static io.scalecube.metrics.MetricsRecorder.Context.METRICS_FILE;
 import static org.agrona.IoUtil.delete;
 import static org.agrona.IoUtil.mapExistingFile;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.scalecube.metrics.MetricsRecorder.Context;
@@ -26,7 +25,9 @@ import java.util.concurrent.atomic.AtomicLong;
 import org.agrona.BufferUtil;
 import org.agrona.CloseHelper;
 import org.agrona.SystemUtil;
+import org.agrona.concurrent.BackoffIdleStrategy;
 import org.agrona.concurrent.UnsafeBuffer;
+import org.agrona.concurrent.YieldingIdleStrategy;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -61,14 +62,14 @@ class MetricsRecorderTest {
     final var metricsBufferLength = nextInt();
     final var idleStrategy = "org.agrona.concurrent.SleepingIdleStrategy";
 
-    Properties props = new Properties();
-    props.setProperty(METRICS_DIRECTORY_NAME_PROP_NAME, metricsDirectoryName);
-    props.setProperty(DIR_DELETE_ON_SHUTDOWN_PROP_NAME, String.valueOf(dirDeleteOnShutdown));
-    props.setProperty(METRICS_BUFFER_LENGTH_PROP_NAME, String.valueOf(metricsBufferLength));
-    props.setProperty(IDLE_STRATEGY_PROP_NAME, idleStrategy);
+    Properties properties = new Properties();
+    properties.setProperty(METRICS_DIRECTORY_NAME_PROP_NAME, metricsDirectoryName);
+    properties.setProperty(DIR_DELETE_ON_SHUTDOWN_PROP_NAME, String.valueOf(dirDeleteOnShutdown));
+    properties.setProperty(METRICS_BUFFER_LENGTH_PROP_NAME, String.valueOf(metricsBufferLength));
+    properties.setProperty(IDLE_STRATEGY_PROP_NAME, idleStrategy);
 
     // when
-    Context context = new Context(props);
+    Context context = new Context(properties);
 
     // then
     assertEquals(metricsDirectoryName, context.metricsDirectoryName());
@@ -80,19 +81,21 @@ class MetricsRecorderTest {
   @Test
   void testPopulateFromPropertiesWithNullMarker() {
     // given
-    Properties props = new Properties();
-    props.setProperty(METRICS_DIRECTORY_NAME_PROP_NAME, NULL_VALUE);
-    props.setProperty(DIR_DELETE_ON_SHUTDOWN_PROP_NAME, NULL_VALUE);
-    props.setProperty(METRICS_BUFFER_LENGTH_PROP_NAME, NULL_VALUE);
-    props.setProperty(IDLE_STRATEGY_PROP_NAME, NULL_VALUE);
+    Properties properties = new Properties();
+    properties.setProperty(METRICS_DIRECTORY_NAME_PROP_NAME, NULL_VALUE);
+    properties.setProperty(DIR_DELETE_ON_SHUTDOWN_PROP_NAME, NULL_VALUE);
+    properties.setProperty(METRICS_BUFFER_LENGTH_PROP_NAME, NULL_VALUE);
+    properties.setProperty(IDLE_STRATEGY_PROP_NAME, NULL_VALUE);
 
     // when
-    Context context = new Context(props);
+    Context context = new Context(properties);
 
     // then: @null must behave exactly as if the property was absent
     Context expected = new Context(new Properties());
-    assertNull(context.metricsDirectoryName(), "metricsDirectoryName");
-    assertNull(context.idleStrategy(), "idleStrategy");
+    assertEquals(
+        expected.metricsDirectoryName(), context.metricsDirectoryName(), "metricsDirectoryName");
+    assertEquals(
+        expected.idleStrategy().getClass(), context.idleStrategy().getClass(), "idleStrategy");
     assertEquals(
         expected.dirDeleteOnShutdown(), context.dirDeleteOnShutdown(), "dirDeleteOnShutdown");
     assertEquals(
@@ -103,10 +106,30 @@ class MetricsRecorderTest {
   void testNullMarkerInSystemProperty() {
     System.setProperty(METRICS_DIRECTORY_NAME_PROP_NAME, NULL_VALUE);
     try {
-      assertNull(new Context().metricsDirectoryName(), "metricsDirectoryName");
+      assertEquals(
+          DEFAULT_METRICS_DIR_NAME, new Context().metricsDirectoryName(), "metricsDirectoryName");
     } finally {
       System.clearProperty(METRICS_DIRECTORY_NAME_PROP_NAME);
     }
+  }
+
+  @Test
+  void testIdleStrategyDefaultsToBackoffAlias() {
+    assertEquals(
+        BackoffIdleStrategy.class,
+        new Context(new Properties()).idleStrategy().getClass(),
+        "idleStrategy");
+  }
+
+  @Test
+  void testIdleStrategyResolvedFromAlias() {
+    final var properties = new Properties();
+    properties.setProperty(IDLE_STRATEGY_PROP_NAME, YieldingIdleStrategy.ALIAS);
+
+    assertEquals(
+        YieldingIdleStrategy.class,
+        new Context(properties).idleStrategy().getClass(),
+        "idleStrategy");
   }
 
   @Test

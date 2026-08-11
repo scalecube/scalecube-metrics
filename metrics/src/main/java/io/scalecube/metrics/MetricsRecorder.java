@@ -31,11 +31,16 @@ import org.agrona.SystemUtil;
 import org.agrona.concurrent.AgentInvoker;
 import org.agrona.concurrent.AgentRunner;
 import org.agrona.concurrent.BackoffIdleStrategy;
+import org.agrona.concurrent.BusySpinIdleStrategy;
 import org.agrona.concurrent.CachedEpochClock;
 import org.agrona.concurrent.EpochClock;
 import org.agrona.concurrent.IdleStrategy;
+import org.agrona.concurrent.NoOpIdleStrategy;
+import org.agrona.concurrent.SleepingIdleStrategy;
+import org.agrona.concurrent.SleepingMillisIdleStrategy;
 import org.agrona.concurrent.SystemEpochClock;
 import org.agrona.concurrent.UnsafeBuffer;
+import org.agrona.concurrent.YieldingIdleStrategy;
 import org.agrona.concurrent.broadcast.BroadcastTransmitter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -184,6 +189,7 @@ public class MetricsRecorder implements AutoCloseable {
     public static final String METRICS_FILE = "metrics.dat";
     public static final String DEFAULT_METRICS_DIR_NAME;
     public static final int DEFAULT_METRICS_BUFFER_LENGTH = 8 * 1024 * 1024;
+    public static final String DEFAULT_IDLE_STRATEGY = BackoffIdleStrategy.ALIAS;
 
     static {
       String baseDirName = null;
@@ -226,16 +232,31 @@ public class MetricsRecorder implements AutoCloseable {
       this(System.getProperties());
     }
 
-    public Context(Properties props) {
-      metricsDirectoryName(getProperty(props, METRICS_DIRECTORY_NAME_PROP_NAME));
-      dirDeleteOnShutdown(getProperty(props, DIR_DELETE_ON_SHUTDOWN_PROP_NAME));
-      metricsBufferLength(getProperty(props, METRICS_BUFFER_LENGTH_PROP_NAME));
-      idleStrategy(getProperty(props, IDLE_STRATEGY_PROP_NAME));
+    public Context(Properties properties) {
+      metricsDirectoryName(properties);
+      dirDeleteOnShutdown(properties);
+      metricsBufferLength(properties);
+      idleStrategy(properties);
     }
 
-    private static String getProperty(Properties props, String name) {
-      final var value = props.getProperty(name);
+    private static String getProperty(Properties properties, String name) {
+      final var value = properties.getProperty(name);
       return "@null".equals(value) ? null : value;
+    }
+
+    private static String getProperty(Properties properties, String name, String defaultValue) {
+      final var value = getProperty(properties, name);
+      return value != null ? value : defaultValue;
+    }
+
+    private static int getProperty(Properties properties, String name, int defaultValue) {
+      final var value = getProperty(properties, name);
+      return value != null ? Integer.parseInt(value) : defaultValue;
+    }
+
+    private static boolean getProperty(Properties properties, String name, boolean defaultValue) {
+      final var value = getProperty(properties, name);
+      return value != null ? Boolean.parseBoolean(value) : defaultValue;
     }
 
     private void conclude() {
@@ -257,17 +278,9 @@ public class MetricsRecorder implements AutoCloseable {
       if (errorHandler == null) {
         errorHandler = ex -> LOGGER.error("Exception occurred", ex);
       }
-
-      if (idleStrategy == null) {
-        idleStrategy = new BackoffIdleStrategy();
-      }
     }
 
     private void concludeMetricsDirectory() {
-      if (metricsDirectoryName == null) {
-        metricsDirectoryName = DEFAULT_METRICS_DIR_NAME;
-      }
-
       if (metricsDir == null) {
         try {
           metricsDir = new File(metricsDirectoryName).getCanonicalFile();
@@ -284,10 +297,6 @@ public class MetricsRecorder implements AutoCloseable {
     }
 
     private void concludeMetricsBuffer() {
-      if (metricsBufferLength == 0) {
-        metricsBufferLength = DEFAULT_METRICS_BUFFER_LENGTH;
-      }
-
       final var min = DEFAULT_METRICS_BUFFER_LENGTH;
       if (metricsBufferLength < min) {
         throw new IllegalArgumentException("metricsBufferLength must be at least " + min);
@@ -335,6 +344,11 @@ public class MetricsRecorder implements AutoCloseable {
       return this;
     }
 
+    public Context metricsDirectoryName(Properties properties) {
+      return metricsDirectoryName(
+          getProperty(properties, METRICS_DIRECTORY_NAME_PROP_NAME, DEFAULT_METRICS_DIR_NAME));
+    }
+
     public boolean dirDeleteOnShutdown() {
       return dirDeleteOnShutdown;
     }
@@ -344,11 +358,8 @@ public class MetricsRecorder implements AutoCloseable {
       return this;
     }
 
-    public Context dirDeleteOnShutdown(String dirDeleteOnShutdown) {
-      if (dirDeleteOnShutdown != null) {
-        return dirDeleteOnShutdown(Boolean.parseBoolean(dirDeleteOnShutdown));
-      }
-      return this;
+    public Context dirDeleteOnShutdown(Properties properties) {
+      return dirDeleteOnShutdown(getProperty(properties, DIR_DELETE_ON_SHUTDOWN_PROP_NAME, false));
     }
 
     public EpochClock epochClock() {
@@ -378,11 +389,9 @@ public class MetricsRecorder implements AutoCloseable {
       return this;
     }
 
-    public Context metricsBufferLength(String metricsBufferLength) {
-      if (metricsBufferLength != null) {
-        return metricsBufferLength(Integer.parseInt(metricsBufferLength));
-      }
-      return this;
+    public Context metricsBufferLength(Properties properties) {
+      return metricsBufferLength(
+          getProperty(properties, METRICS_BUFFER_LENGTH_PROP_NAME, DEFAULT_METRICS_BUFFER_LENGTH));
     }
 
     public boolean useAgentInvoker() {
@@ -408,20 +417,40 @@ public class MetricsRecorder implements AutoCloseable {
       return this;
     }
 
-    public Context idleStrategy(String idleStrategy) {
-      if (idleStrategy != null) {
-        try {
-          return idleStrategy(
-              (IdleStrategy) Class.forName(idleStrategy).getConstructor().newInstance());
-        } catch (Exception ex) {
-          LangUtil.rethrowUnchecked(ex);
-        }
+    public Context idleStrategy(String name) {
+      if (name != null) {
+        return idleStrategy(agentIdleStrategy(name));
       }
       return this;
     }
 
+    public Context idleStrategy(Properties properties) {
+      return idleStrategy(getProperty(properties, IDLE_STRATEGY_PROP_NAME, DEFAULT_IDLE_STRATEGY));
+    }
+
     public IdleStrategy idleStrategy() {
       return idleStrategy;
+    }
+
+    private static IdleStrategy agentIdleStrategy(String name) {
+      return switch (name) {
+        case BackoffIdleStrategy.ALIAS -> new BackoffIdleStrategy();
+        case BusySpinIdleStrategy.ALIAS -> new BusySpinIdleStrategy();
+        case YieldingIdleStrategy.ALIAS -> new YieldingIdleStrategy();
+        case NoOpIdleStrategy.ALIAS -> new NoOpIdleStrategy();
+        case SleepingIdleStrategy.ALIAS -> new SleepingIdleStrategy();
+        case SleepingMillisIdleStrategy.ALIAS -> new SleepingMillisIdleStrategy();
+        default -> newIdleStrategy(name);
+      };
+    }
+
+    private static IdleStrategy newIdleStrategy(String className) {
+      try {
+        return (IdleStrategy) Class.forName(className).getConstructor().newInstance();
+      } catch (Exception ex) {
+        LangUtil.rethrowUnchecked(ex);
+        return null;
+      }
     }
 
     private BroadcastTransmitter metricsTransmitter() {
