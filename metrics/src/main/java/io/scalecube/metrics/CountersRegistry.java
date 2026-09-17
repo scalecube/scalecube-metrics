@@ -339,7 +339,7 @@ public class CountersRegistry implements AutoCloseable {
           countersMetaDataBufferLength(countersValuesBufferLength);
       final var totalLength =
           HEADER_LENGTH + countersMetaDataBufferLength + countersValuesBufferLength;
-      return totalLength >= fileLength;
+      return fileLength >= totalLength;
     }
 
     public static boolean isCountersActive(
