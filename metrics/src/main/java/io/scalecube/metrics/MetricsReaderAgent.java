@@ -129,11 +129,30 @@ public class MetricsReaderAgent implements MessageHandler, Agent {
     }
 
     metricsByteBuffer = mapExistingFile(metricsFile, MapMode.READ_ONLY, METRICS_FILE);
+
+    final var fileLength = metricsByteBuffer.capacity();
+    if (!LayoutDescriptor.isMetricsHeaderLengthSufficient(fileLength)) {
+      LOGGER.warn("[{}] {} is truncated, length: {}", roleName(), metricsFile, fileLength);
+      state(State.CLEANUP);
+      return 0;
+    }
+
     final var headerLength = LayoutDescriptor.HEADER_LENGTH;
     headerBuffer.wrap(metricsByteBuffer, 0, headerLength);
     metricsBufferLength = LayoutDescriptor.metricsBufferLength(headerBuffer);
 
     if (metricsBufferLength <= 0) {
+      state(State.CLEANUP);
+      return 0;
+    }
+
+    if (!LayoutDescriptor.isMetricsFileLengthSufficient(headerBuffer, fileLength)) {
+      LOGGER.warn(
+          "[{}] {} is shorter than its header declares, length: {}, declared: {}",
+          roleName(),
+          metricsFile,
+          fileLength,
+          headerLength + metricsBufferLength);
       state(State.CLEANUP);
       return 0;
     }

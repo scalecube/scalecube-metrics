@@ -5,6 +5,7 @@ import static io.scalecube.metrics.CountersRegistry.Context.COUNTERS_VALUES_BUFF
 import static io.scalecube.metrics.CountersRegistry.Context.DEFAULT_COUNTERS_DIR_NAME;
 import static io.scalecube.metrics.CountersRegistry.Context.DIR_DELETE_ON_SHUTDOWN_PROP_NAME;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -198,6 +199,31 @@ class CountersRegistryTest {
     assertEquals(
         context.countersValuesBufferLength(),
         LayoutDescriptor.countersValuesBufferLength(headerBuffer));
+  }
+
+  @Test
+  void testCountersFileLengthSufficient() {
+    final var context = countersRegistry.context();
+    final var mappedBuffer = context.countersMetaDataBuffer().byteBuffer();
+    final var headerBuffer = LayoutDescriptor.createHeaderBuffer(mappedBuffer);
+    final var required = LayoutDescriptor.countersFileLength(context.countersValuesBufferLength());
+
+    assertTrue(
+        LayoutDescriptor.isCountersFileLengthSufficient(headerBuffer, required),
+        "a file exactly as long as the header declares is sufficient");
+    assertTrue(
+        LayoutDescriptor.isCountersFileLengthSufficient(headerBuffer, required + 1),
+        "a longer file is sufficient");
+    assertFalse(
+        LayoutDescriptor.isCountersFileLengthSufficient(headerBuffer, required - 1),
+        "a file shorter than the header declares is not sufficient");
+  }
+
+  @Test
+  void testCountersHeaderLengthSufficient() {
+    assertTrue(LayoutDescriptor.isCountersHeaderLengthSufficient(LayoutDescriptor.HEADER_LENGTH));
+    assertFalse(
+        LayoutDescriptor.isCountersHeaderLengthSufficient(LayoutDescriptor.HEADER_LENGTH - 1));
   }
 
   @Test
