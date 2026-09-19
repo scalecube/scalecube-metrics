@@ -5,16 +5,22 @@ import static io.scalecube.metrics.CounterTags.WRITE_EPOCH_ID;
 import static io.scalecube.metrics.CounterVisibility.PRIVATE;
 import static io.scalecube.metrics.CountersRegistry.Context.DEFAULT_COUNTERS_DIR_NAME;
 import static org.agrona.IoUtil.delete;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.assertArg;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 
 import io.scalecube.metrics.CountersReaderAgent.State;
 import io.scalecube.metrics.CountersRegistry.Context;
 import java.io.File;
+import java.io.IOException;
+import java.io.RandomAccessFile;
+import java.nio.file.Files;
+import java.nio.file.StandardCopyOption;
 import java.time.Duration;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -22,6 +28,7 @@ import org.agrona.concurrent.CachedEpochClock;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 class CountersReaderAgentTest {
 
@@ -49,6 +56,67 @@ class CountersReaderAgentTest {
   void afterEach() {
     if (agent != null) {
       agent.onClose();
+    }
+  }
+
+  @Test
+  void testTruncatedCountersFileIsReportedInsteadOfCrashing(@TempDir File dir) throws IOException {
+    countersFileOfLength(dir, 8);
+
+    final var handler = mock(CountersHandler.class);
+    final var truncatedAgent = newAgent(dir, handler);
+
+    assertDoesNotThrow(truncatedAgent::doWork, "a truncated file must not blow up the read cycle");
+    assertEquals(State.CLEANUP, truncatedAgent.state(), "a bad file routes to cleanup");
+    truncatedAgent.doWork();
+    assertEquals(State.READ_COUNTERS, truncatedAgent.state(), "and the agent recovers");
+    verifyNoInteractions(handler);
+  }
+
+  @Test
+  void testCountersFileShorterThanItsHeaderDeclaresIsReportedInsteadOfCrashing(@TempDir File dir)
+      throws IOException {
+    try (final var countersRegistry = CountersRegistry.create()) {
+      countersRegistry.countersManager().newCounter("foo").set(1);
+      copyTruncated(
+          new File(DEFAULT_COUNTERS_DIR_NAME),
+          dir,
+          CountersRegistry.LayoutDescriptor.HEADER_LENGTH + 1024);
+    }
+
+    final var handler = mock(CountersHandler.class);
+    final var truncatedAgent = newAgent(dir, handler);
+
+    assertDoesNotThrow(
+        truncatedAgent::doWork, "a file shorter than its header declares must not be read");
+    assertEquals(State.CLEANUP, truncatedAgent.state(), "a bad file routes to cleanup");
+    truncatedAgent.doWork();
+    assertEquals(State.READ_COUNTERS, truncatedAgent.state(), "and the agent recovers");
+    verifyNoInteractions(handler);
+  }
+
+  private CountersReaderAgent newAgent(File dir, CountersHandler handler) {
+    final var newAgent =
+        new CountersReaderAgent(
+            "CountersReaderAgent", dir, false, epochClock, Duration.ZERO, handler);
+    newAgent.onStart();
+    return newAgent;
+  }
+
+  private static void countersFileOfLength(File dir, int length) throws IOException {
+    try (var file = new RandomAccessFile(new File(dir, Context.COUNTERS_FILE), "rw")) {
+      file.setLength(length);
+    }
+  }
+
+  private static void copyTruncated(File srcDir, File dstDir, int length) throws IOException {
+    final var target = new File(dstDir, Context.COUNTERS_FILE);
+    Files.copy(
+        new File(srcDir, Context.COUNTERS_FILE).toPath(),
+        target.toPath(),
+        StandardCopyOption.REPLACE_EXISTING);
+    try (var file = new RandomAccessFile(target, "rw")) {
+      file.setLength(length);
     }
   }
 

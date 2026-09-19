@@ -9,6 +9,7 @@ import static io.scalecube.metrics.MetricsRecorder.Context.METRICS_FILE;
 import static org.agrona.IoUtil.delete;
 import static org.agrona.IoUtil.mapExistingFile;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.scalecube.metrics.MetricsRecorder.Context;
@@ -198,6 +199,32 @@ class MetricsRecorderTest {
     }
 
     assertMetricsHeader(START_TIMESTAMP, PID);
+  }
+
+  @Test
+  void testMetricsFileLengthSufficient() {
+    final var headerBuffer = new UnsafeBuffer(new byte[LayoutDescriptor.HEADER_LENGTH]);
+    final var metricsBufferLength = OLD_BUFFER_LENGTH;
+    LayoutDescriptor.fillHeaderBuffer(headerBuffer, START_TIMESTAMP, PID, metricsBufferLength);
+
+    final var required = LayoutDescriptor.HEADER_LENGTH + metricsBufferLength;
+
+    assertTrue(
+        LayoutDescriptor.isMetricsFileLengthSufficient(headerBuffer, required),
+        "a file exactly as long as the header declares is sufficient");
+    assertTrue(
+        LayoutDescriptor.isMetricsFileLengthSufficient(headerBuffer, required + 1),
+        "a longer file is sufficient");
+    assertFalse(
+        LayoutDescriptor.isMetricsFileLengthSufficient(headerBuffer, required - 1),
+        "a file shorter than the header declares is not sufficient");
+  }
+
+  @Test
+  void testMetricsHeaderLengthSufficient() {
+    assertTrue(LayoutDescriptor.isMetricsHeaderLengthSufficient(LayoutDescriptor.HEADER_LENGTH));
+    assertFalse(
+        LayoutDescriptor.isMetricsHeaderLengthSufficient(LayoutDescriptor.HEADER_LENGTH - 1));
   }
 
   private static void updateMetricsHeader(long startTimestamp, long pid, int bufferLength) {

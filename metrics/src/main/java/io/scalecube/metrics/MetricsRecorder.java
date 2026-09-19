@@ -501,7 +501,7 @@ public class MetricsRecorder implements AutoCloseable {
 
     public static boolean isMetricsFileLengthSufficient(DirectBuffer headerBuffer, int fileLength) {
       final var totalLength = HEADER_LENGTH + metricsBufferLength(headerBuffer);
-      return totalLength >= fileLength;
+      return fileLength >= totalLength;
     }
 
     public static boolean isMetricsActive(

@@ -120,11 +120,29 @@ public class CountersReaderAgent implements Agent {
 
     final var countersByteBuffer = mapExistingFile(countersFile, MapMode.READ_ONLY, COUNTERS_FILE);
     try {
+      final var fileLength = countersByteBuffer.capacity();
+      if (!LayoutDescriptor.isCountersHeaderLengthSufficient(fileLength)) {
+        LOGGER.warn("[{}] {} is truncated, length: {}", roleName(), countersFile, fileLength);
+        state(State.CLEANUP);
+        return 0;
+      }
+
       headerBuffer.wrap(countersByteBuffer, 0, LayoutDescriptor.HEADER_LENGTH);
       final var countersValuesBufferLength =
           LayoutDescriptor.countersValuesBufferLength(headerBuffer);
 
       if (countersValuesBufferLength <= 0) {
+        state(State.CLEANUP);
+        return 0;
+      }
+
+      if (!LayoutDescriptor.isCountersFileLengthSufficient(headerBuffer, fileLength)) {
+        LOGGER.warn(
+            "[{}] {} is shorter than its header declares, length: {}, declared: {}",
+            roleName(),
+            countersFile,
+            fileLength,
+            LayoutDescriptor.countersFileLength(countersValuesBufferLength));
         state(State.CLEANUP);
         return 0;
       }
