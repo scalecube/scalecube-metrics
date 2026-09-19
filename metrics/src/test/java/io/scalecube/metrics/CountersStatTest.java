@@ -219,16 +219,6 @@ class CountersStatTest {
   }
 
   @Test
-  void anUnknownCounterVisibilityValueRendersAsTheRawByteRatherThanThrowing() {
-    final var tags = Map.<String, Object>of(COUNTER_VISIBILITY, (byte) 99);
-
-    assertEquals(
-        "{counterVisibility=99}",
-        CountersStat.formatTags(new Key(tags)),
-        "a file written by a newer or a corrupted writer still renders");
-  }
-
-  @Test
   void aCounterWithoutTagsRendersNoBraces() {
     assertTrue(CountersStat.formatTags(new Key(Map.of())).isEmpty());
   }

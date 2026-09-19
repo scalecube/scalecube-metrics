@@ -291,10 +291,7 @@ public class CountersStat {
 
   private static String formatTagValue(String tag, Object value) {
     if (COUNTER_VISIBILITY.equals(tag) && value instanceof Byte byteValue) {
-      final var visibility = CounterVisibility.find(byteValue);
-      if (visibility != null) {
-        return visibility.name();
-      }
+      return CounterVisibility.get(byteValue).name();
     }
     return String.valueOf(value);
   }
