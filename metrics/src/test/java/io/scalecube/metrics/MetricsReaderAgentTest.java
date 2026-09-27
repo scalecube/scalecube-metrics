@@ -18,6 +18,7 @@ import java.nio.file.StandardCopyOption;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.stream.LongStream;
 import org.agrona.CloseHelper;
 import org.agrona.DirectBuffer;
 import org.agrona.IoUtil;
@@ -43,7 +44,7 @@ class MetricsReaderAgentTest {
     assertDoesNotThrow(agent::doWork, "a truncated file must not blow up initialisation");
     assertEquals(State.CLEANUP, agent.state(), "a bad file routes to cleanup");
     agent.doWork();
-    assertEquals(State.INIT, agent.state(), "and the agent goes back to retrying");
+    assertEquals(State.READ_METRICS, agent.state(), "and the agent goes back to retrying");
     verifyNoInteractions(handler);
   }
 
@@ -66,7 +67,7 @@ class MetricsReaderAgentTest {
     assertDoesNotThrow(agent::doWork, "a file shorter than its header declares must not be read");
     assertEquals(State.CLEANUP, agent.state(), "a bad file routes to cleanup");
     agent.doWork();
-    assertEquals(State.INIT, agent.state(), "and the agent goes back to retrying");
+    assertEquals(State.READ_METRICS, agent.state(), "and the agent goes back to retrying");
     verifyNoInteractions(handler);
   }
 
@@ -89,7 +90,7 @@ class MetricsReaderAgentTest {
                 }
               });
       agent.doWork();
-      assertEquals(State.RUNNING, agent.state());
+      assertEquals(State.READ_METRICS, agent.state());
 
       transmitter.transmitTps(1);
       drain(agent);
@@ -103,13 +104,136 @@ class MetricsReaderAgentTest {
 
       values.clear();
       assertDoesNotThrow(() -> drain(agent), "lapped reader must not fail");
-      assertEquals(State.RUNNING, agent.state(), "lapped reader keeps running");
+      assertEquals(State.READ_METRICS, agent.state(), "lapped reader keeps running");
       final var first = values.get(0);
       assertTrue(first > 2, "lost messages are skipped, first: " + first);
       assertEquals(count, values.get(values.size() - 1), "and reading continues up to the latest");
     } finally {
       CloseHelper.quietClose(recorder);
     }
+  }
+
+  @Test
+  void testPositionIsKeptAcrossReads(@TempDir File dir) {
+    final var recorder =
+        MetricsRecorder.launch(
+            new Context().metricsDirectoryName(dir.getPath()).useAgentInvoker(true));
+    try {
+      final var transmitter = new MetricsTransmitter(dir);
+      final var values = new ArrayList<Long>();
+      final var agent =
+          newAgent(
+              dir,
+              new MetricsHandler() {
+                @Override
+                public void onTps(
+                    long timestamp, DirectBuffer keyBuffer, int keyOffset, int length, long value) {
+                  values.add(value);
+                }
+              });
+      agent.doWork(); // attach
+
+      long value = 0;
+      for (int read = 0; read < 5; read++) {
+        for (int i = 0; i < 3; i++) {
+          transmitter.transmitTps(++value);
+        }
+        drain(agent); // each read maps and unmaps the file
+      }
+
+      assertEquals(
+          LongStream.rangeClosed(1, value).boxed().toList(), values, "all messages, in order");
+    } finally {
+      CloseHelper.quietClose(recorder);
+    }
+  }
+
+  @Test
+  void testWriterRestartBetweenReads(@TempDir File dir) {
+    var recorder = launchRecorder(dir);
+    try {
+      var transmitter = new MetricsTransmitter(dir);
+      final var values = new ArrayList<Long>();
+      final var agent = newAgent(dir, tpsHandler(values));
+      agent.doWork(); // attach
+
+      // old writer is well ahead, so its position is meaningless for the new file
+      for (long i = 1; i <= 100; i++) {
+        transmitter.transmitTps(i);
+      }
+      drain(agent);
+      assertEquals(100, values.size());
+
+      // restart within one read interval: reader never sees the file missing
+      CloseHelper.quietClose(recorder);
+      recorder = launchRecorder(dir);
+      transmitter = new MetricsTransmitter(dir);
+      transmitter.pid(ProcessHandle.current().pid() + 1);
+      values.clear();
+
+      transmitter.transmitTps(1001);
+      drain(agent);
+      assertEquals(State.READ_METRICS, agent.state());
+      assertEquals(List.of(), values, "re-attaches from the latest message of the new writer");
+
+      transmitter.transmitTps(1002);
+      transmitter.transmitTps(1003);
+      drain(agent);
+      assertEquals(List.of(1002L, 1003L), values, "then reads the new writer");
+    } finally {
+      CloseHelper.quietClose(recorder);
+    }
+  }
+
+  @Test
+  void testWriterGoneThenBack(@TempDir File dir) {
+    var recorder = launchRecorder(dir);
+    try {
+      var transmitter = new MetricsTransmitter(dir);
+      final var values = new ArrayList<Long>();
+      final var agent = newAgent(dir, tpsHandler(values));
+      agent.doWork(); // attach
+
+      transmitter.transmitTps(1);
+      drain(agent);
+      assertEquals(List.of(1L), values);
+
+      // writer gone
+      CloseHelper.quietClose(recorder);
+      IoUtil.delete(dir, false);
+      drain(agent);
+      assertEquals(State.CLEANUP, agent.state(), "missing file routes to cleanup");
+      agent.doWork();
+      assertEquals(State.READ_METRICS, agent.state(), "and back to reading");
+
+      // writer back
+      recorder = launchRecorder(dir);
+      transmitter = new MetricsTransmitter(dir);
+      values.clear();
+      drain(agent); // attach
+
+      transmitter.transmitTps(2);
+      transmitter.transmitTps(3);
+      drain(agent);
+      assertEquals(List.of(2L, 3L), values);
+    } finally {
+      CloseHelper.quietClose(recorder);
+    }
+  }
+
+  private static MetricsRecorder launchRecorder(File dir) {
+    return MetricsRecorder.launch(
+        new Context().metricsDirectoryName(dir.getPath()).useAgentInvoker(true));
+  }
+
+  private static MetricsHandler tpsHandler(List<Long> values) {
+    return new MetricsHandler() {
+      @Override
+      public void onTps(
+          long timestamp, DirectBuffer keyBuffer, int keyOffset, int length, long value) {
+        values.add(value);
+      }
+    };
   }
 
   @Test
@@ -125,7 +249,7 @@ class MetricsReaderAgentTest {
       for (int i = 0; i < 16; i++) {
         final var agent = newAgent(dir, mock(MetricsHandler.class));
         agent.doWork();
-        assertEquals(State.RUNNING, agent.state());
+        assertEquals(State.READ_METRICS, agent.state());
         agents.add(agent);
       }
       transmitter.transmitTps(1);
@@ -156,17 +280,17 @@ class MetricsReaderAgentTest {
     agent.doWork();
   }
 
-  /** Writes tps messages straight into metrics file of running {@link MetricsRecorder}. */
   private static class MetricsTransmitter {
 
     private final MetricsEncoder encoder = new MetricsEncoder();
     private final UnsafeBuffer keyBuffer = new UnsafeBuffer(new byte[64]);
     private final int keyLength;
+    private final UnsafeBuffer header;
     private final BroadcastTransmitter transmitter;
 
     MetricsTransmitter(File dir) {
       final var mappedBuffer = IoUtil.mapExistingFile(new File(dir, Context.METRICS_FILE), "test");
-      final var header = MetricsRecorder.LayoutDescriptor.createHeaderBuffer(mappedBuffer);
+      header = MetricsRecorder.LayoutDescriptor.createHeaderBuffer(mappedBuffer);
       transmitter =
           new BroadcastTransmitter(
               new UnsafeBuffer(
@@ -179,6 +303,14 @@ class MetricsReaderAgentTest {
 
     int capacity() {
       return transmitter.capacity();
+    }
+
+    void pid(long pid) {
+      MetricsRecorder.LayoutDescriptor.fillHeaderBuffer(
+          header,
+          MetricsRecorder.LayoutDescriptor.startTimestamp(header),
+          pid,
+          MetricsRecorder.LayoutDescriptor.metricsBufferLength(header));
     }
 
     void transmitTps(long value) {

@@ -350,7 +350,7 @@ class HistogramMetricTest {
       metricsHandler.reset();
       advanceClock(RESOLUTION * 10);
       metricsReaderAgent.doWork();
-      assertEquals(State.RUNNING, metricsReaderAgent.state(), "metricsReaderAgent.state");
+      assertEquals(State.READ_METRICS, metricsReaderAgent.state(), "metricsReaderAgent.state");
 
       // And once writer transmits again, it's read
       metricsRecorder.agentInvoker().invoke();
@@ -406,7 +406,7 @@ class HistogramMetricTest {
       // Advance for retry overdue
       advanceClock(RESOLUTION * 10);
       metricsReaderAgent.doWork();
-      assertEquals(State.INIT, metricsReaderAgent.state(), "metricsReaderAgent.state");
+      assertEquals(State.READ_METRICS, metricsReaderAgent.state(), "metricsReaderAgent.state");
 
       // Advance for retry overdue
       advanceClock(RESOLUTION * 10);
@@ -436,13 +436,13 @@ class HistogramMetricTest {
       advanceClock(RESOLUTION * 10);
       metricsRecorder.agentInvoker().invoke();
       metricsReaderAgent.doWork();
-      assertEquals(State.INIT, metricsReaderAgent.state(), "metricsReaderAgent.state");
+      assertEquals(State.READ_METRICS, metricsReaderAgent.state(), "metricsReaderAgent.state");
 
       // Advance for retry overdue
       advanceClock(RESOLUTION * 10);
       metricsRecorder.agentInvoker().invoke();
       metricsReaderAgent.doWork();
-      assertEquals(State.RUNNING, metricsReaderAgent.state(), "metricsReaderAgent.state");
+      assertEquals(State.READ_METRICS, metricsReaderAgent.state(), "metricsReaderAgent.state");
     }
   }
 

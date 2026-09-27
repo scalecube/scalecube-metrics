@@ -38,11 +38,10 @@ public class MetricsReaderAgent implements MessageHandler, Agent {
 
   private static final Logger LOGGER = LoggerFactory.getLogger(MetricsReaderAgent.class);
 
-  private static final int INITIAL_MESSAGE_BUFFER_LENGTH = 4096;
+  private static final int INITIAL_MESSAGE_BUFFER_LENGTH = 64 * 1024;
 
   public enum State {
-    INIT,
-    RUNNING,
+    READ_METRICS,
     CLEANUP,
     CLOSED
   }
@@ -104,14 +103,14 @@ public class MetricsReaderAgent implements MessageHandler, Agent {
     if (state != State.CLOSED) {
       throw new IllegalStateException("Illegal state: " + state);
     }
-    state(State.INIT);
+    state(State.READ_METRICS);
   }
 
   @Override
   public int doWork() {
     try {
       return switch (state) {
-        case INIT, RUNNING -> readMetrics();
+        case READ_METRICS -> readMetrics();
         case CLEANUP -> cleanup();
         case CLOSED -> 0;
       };
@@ -180,15 +179,14 @@ public class MetricsReaderAgent implements MessageHandler, Agent {
     // receiver's position from the previous read
     broadcastBuffer.wrap(metricsByteBuffer, headerLength, metricsBufferLength);
 
-    if (state == State.INIT
+    if (broadcastReceiver == null
         || !LayoutDescriptor.isMetricsActive(headerBuffer, startTimestamp, pid)) {
       startTimestamp = LayoutDescriptor.startTimestamp(headerBuffer);
       pid = LayoutDescriptor.pid(headerBuffer);
       broadcastReceiver = new BroadcastReceiver(broadcastBuffer);
       broadcastReceiver.receiveNext(); // skip first (latest) one, start from the end
       lappedCount = broadcastReceiver.lappedCount();
-      state(State.RUNNING);
-      LOGGER.info("[{}] Initialized, now running, pid: {}", roleName(), pid);
+      LOGGER.info("[{}] Attached to writer, pid: {}", roleName(), pid);
       return 1;
     }
 
@@ -276,9 +274,10 @@ public class MetricsReaderAgent implements MessageHandler, Agent {
   }
 
   private int cleanup() {
+    broadcastReceiver = null;
     State previous = state;
     if (previous != State.CLOSED) { // when it comes from onClose()
-      state(State.INIT);
+      state(State.READ_METRICS);
     }
     return 1;
   }
