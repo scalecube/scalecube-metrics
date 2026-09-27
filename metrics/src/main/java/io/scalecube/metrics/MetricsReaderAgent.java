@@ -15,27 +15,33 @@ import java.nio.MappedByteBuffer;
 import java.nio.channels.FileChannel.MapMode;
 import java.time.Duration;
 import org.agrona.BufferUtil;
+import org.agrona.ExpandableArrayBuffer;
 import org.agrona.MutableDirectBuffer;
 import org.agrona.concurrent.Agent;
 import org.agrona.concurrent.EpochClock;
 import org.agrona.concurrent.MessageHandler;
 import org.agrona.concurrent.UnsafeBuffer;
 import org.agrona.concurrent.broadcast.BroadcastReceiver;
-import org.agrona.concurrent.broadcast.CopyBroadcastReceiver;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * Agent that consumes metrics (histograms, tps values) from the {@link BroadcastReceiver}, and
- * dispatches them them to the supplied {@link MetricsHandler}.
+ * Agent that consumes metrics (histograms, tps values) from {@link Context#METRICS_FILE}, and
+ * dispatches them to the supplied {@link MetricsHandler}.
+ *
+ * <p>Polls same way as {@link CountersReaderAgent}: every {@code readInterval} maps the file, reads
+ * messages transmitted since the previous read, and unmaps the file. On first read, or when writer
+ * process changed (pid, start time), reading starts from the latest message. If reader was lapped
+ * between reads, lost messages are skipped.
  */
 public class MetricsReaderAgent implements MessageHandler, Agent {
 
   private static final Logger LOGGER = LoggerFactory.getLogger(MetricsReaderAgent.class);
 
+  private static final int INITIAL_MESSAGE_BUFFER_LENGTH = 64 * 1024;
+
   public enum State {
-    INIT,
-    RUNNING,
+    READ_METRICS,
     CLEANUP,
     CLOSED
   }
@@ -45,16 +51,17 @@ public class MetricsReaderAgent implements MessageHandler, Agent {
   private final boolean warnIfMetricsNotExists;
   private final MetricsHandler metricsHandler;
   private final EpochClock epochClock;
-  private final long retryInterval;
+  private final long readInterval;
 
-  private File metricsFile;
-  private long nextRetryTime;
-  private long nextHeartbeatTimeout;
-  private MappedByteBuffer metricsByteBuffer;
+  private long nextReadTime;
+  private long startTimestamp;
+  private long pid;
+  private long lappedCount;
   private final UnsafeBuffer headerBuffer = new UnsafeBuffer();
-  private int metricsBufferLength = -1;
-  private ByteBuffer scratchBuffer;
-  private CopyBroadcastReceiver broadcastReceiver;
+  private final UnsafeBuffer broadcastBuffer = new UnsafeBuffer();
+  private BroadcastReceiver broadcastReceiver;
+  private final ExpandableArrayBuffer messageBuffer =
+      new ExpandableArrayBuffer(INITIAL_MESSAGE_BUFFER_LENGTH);
   private final MessageHeaderDecoder headerDecoder = new MessageHeaderDecoder();
   private final HistogramDecoder histogramDecoder = new HistogramDecoder();
   private final TpsDecoder tpsDecoder = new TpsDecoder();
@@ -64,10 +71,11 @@ public class MetricsReaderAgent implements MessageHandler, Agent {
    * Constructor.
    *
    * @param roleName roleName
-   * @param metricsDir counters directory with {@link Context#METRICS_FILE}
+   * @param metricsDir metrics directory with {@link Context#METRICS_FILE}
    * @param warnIfMetricsNotExists whether to log warning if metrics file does not exist
    * @param epochClock epochClock
-   * @param retryInterval retryInterval
+   * @param readInterval interval of reading metrics file, also retry interval if the file is
+   *     missing or invalid
    * @param metricsHandler callback handler for processing metrics (histograms, tps values)
    */
   public MetricsReaderAgent(
@@ -75,14 +83,14 @@ public class MetricsReaderAgent implements MessageHandler, Agent {
       File metricsDir,
       boolean warnIfMetricsNotExists,
       EpochClock epochClock,
-      Duration retryInterval,
+      Duration readInterval,
       MetricsHandler metricsHandler) {
     this.roleName = roleName;
     this.metricsDir = metricsDir;
     this.warnIfMetricsNotExists = warnIfMetricsNotExists;
     this.metricsHandler = metricsHandler;
     this.epochClock = epochClock;
-    this.retryInterval = retryInterval.toMillis();
+    this.readInterval = readInterval.toMillis();
   }
 
   @Override
@@ -95,15 +103,14 @@ public class MetricsReaderAgent implements MessageHandler, Agent {
     if (state != State.CLOSED) {
       throw new IllegalStateException("Illegal state: " + state);
     }
-    state(State.INIT);
+    state(State.READ_METRICS);
   }
 
   @Override
   public int doWork() {
     try {
       return switch (state) {
-        case INIT -> init();
-        case RUNNING -> running();
+        case READ_METRICS -> readMetrics();
         case CLEANUP -> cleanup();
         case CLOSED -> 0;
       };
@@ -113,13 +120,15 @@ public class MetricsReaderAgent implements MessageHandler, Agent {
     }
   }
 
-  private int init() {
-    if (epochClock.time() < nextRetryTime) {
+  private int readMetrics() {
+    final var now = epochClock.time();
+    if (now < nextReadTime) {
       return 0;
+    } else {
+      nextReadTime = now + readInterval;
     }
 
-    metricsFile = new File(metricsDir, METRICS_FILE);
-
+    final var metricsFile = new File(metricsDir, METRICS_FILE);
     if (!metricsFile.exists()) {
       if (warnIfMetricsNotExists) {
         LOGGER.warn("[{}] {} not exists", roleName(), metricsFile);
@@ -128,8 +137,17 @@ public class MetricsReaderAgent implements MessageHandler, Agent {
       return 0;
     }
 
-    metricsByteBuffer = mapExistingFile(metricsFile, MapMode.READ_ONLY, METRICS_FILE);
+    final var metricsByteBuffer = mapExistingFile(metricsFile, MapMode.READ_ONLY, METRICS_FILE);
+    try {
+      return readMetrics(metricsFile, metricsByteBuffer);
+    } finally {
+      broadcastBuffer.wrap(0, 0);
+      headerBuffer.wrap(0, 0);
+      BufferUtil.free(metricsByteBuffer);
+    }
+  }
 
+  private int readMetrics(File metricsFile, MappedByteBuffer metricsByteBuffer) {
     final var fileLength = metricsByteBuffer.capacity();
     if (!LayoutDescriptor.isMetricsHeaderLengthSufficient(fileLength)) {
       LOGGER.warn("[{}] {} is truncated, length: {}", roleName(), metricsFile, fileLength);
@@ -139,7 +157,7 @@ public class MetricsReaderAgent implements MessageHandler, Agent {
 
     final var headerLength = LayoutDescriptor.HEADER_LENGTH;
     headerBuffer.wrap(metricsByteBuffer, 0, headerLength);
-    metricsBufferLength = LayoutDescriptor.metricsBufferLength(headerBuffer);
+    final var metricsBufferLength = LayoutDescriptor.metricsBufferLength(headerBuffer);
 
     if (metricsBufferLength <= 0) {
       state(State.CLEANUP);
@@ -157,36 +175,50 @@ public class MetricsReaderAgent implements MessageHandler, Agent {
       return 0;
     }
 
-    scratchBuffer = ByteBuffer.allocateDirect(1024 * 1024);
-    broadcastReceiver =
-        new CopyBroadcastReceiver(
-            new BroadcastReceiver(
-                new UnsafeBuffer(metricsByteBuffer, headerLength, metricsBufferLength)),
-            new UnsafeBuffer(scratchBuffer));
-    broadcastReceiver.receive(
-        (msgTypeId, buffer, index, length) -> {
-          // skip first
-        });
+    // BroadcastReceiver reads through this buffer, re-wrapping it onto the new mapping keeps
+    // receiver's position from the previous read
+    broadcastBuffer.wrap(metricsByteBuffer, headerLength, metricsBufferLength);
 
-    nextHeartbeatTimeout = epochClock.time() + retryInterval;
+    if (broadcastReceiver == null
+        || !LayoutDescriptor.isMetricsActive(headerBuffer, startTimestamp, pid)) {
+      startTimestamp = LayoutDescriptor.startTimestamp(headerBuffer);
+      pid = LayoutDescriptor.pid(headerBuffer);
+      broadcastReceiver = new BroadcastReceiver(broadcastBuffer);
+      broadcastReceiver.receiveNext(); // skip first (latest) one, start from the end
+      lappedCount = broadcastReceiver.lappedCount();
+      LOGGER.info("[{}] Attached to writer, pid: {}", roleName(), pid);
+      return 1;
+    }
 
-    state(State.RUNNING);
-    LOGGER.info("[{}] Initialized, now running", roleName());
-    return 1;
+    return receiveMessages(metricsFile);
   }
 
-  private int running() {
-    if (epochClock.time() > nextHeartbeatTimeout) {
-      LOGGER.warn("[{}] {} is not active", roleName(), metricsFile);
-      state(State.CLEANUP);
-      return 0;
+  private int receiveMessages(File metricsFile) {
+    int workCount = 0;
+    while (broadcastReceiver.receiveNext()) {
+      if (broadcastReceiver.lappedCount() != lappedCount) {
+        lappedCount = broadcastReceiver.lappedCount();
+        LOGGER.warn(
+            "[{}] {} writer lapped reader, messages lost, lappedCount: {}",
+            roleName(),
+            metricsFile,
+            lappedCount);
+      }
+
+      final var length = broadcastReceiver.length();
+      messageBuffer.putBytes(0, broadcastReceiver.buffer(), broadcastReceiver.offset(), length);
+
+      // Message could be overwritten while being copied, then skip it, as being lost
+      if (broadcastReceiver.validate()) {
+        onMessage(broadcastReceiver.typeId(), messageBuffer, 0, length);
+        workCount++;
+      }
     }
-    return broadcastReceiver.receive(this);
+    return workCount;
   }
 
   @Override
   public void onMessage(int msgTypeId, MutableDirectBuffer buffer, int index, int length) {
-    nextHeartbeatTimeout = epochClock.time() + retryInterval;
     headerDecoder.wrap(buffer, index);
     switch (headerDecoder.templateId()) {
       case HistogramDecoder.TEMPLATE_ID:
@@ -242,17 +274,10 @@ public class MetricsReaderAgent implements MessageHandler, Agent {
   }
 
   private int cleanup() {
-    BufferUtil.free(scratchBuffer);
-    scratchBuffer = null;
-    BufferUtil.free(metricsByteBuffer);
-    metricsByteBuffer = null;
-    metricsFile = null;
-    metricsBufferLength = -1;
-
+    broadcastReceiver = null;
     State previous = state;
     if (previous != State.CLOSED) { // when it comes from onClose()
-      nextRetryTime = epochClock.time() + retryInterval;
-      state(State.INIT);
+      state(State.READ_METRICS);
     }
     return 1;
   }
