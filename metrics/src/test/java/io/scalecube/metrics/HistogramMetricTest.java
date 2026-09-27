@@ -290,7 +290,7 @@ class HistogramMetricTest {
   class Reconnection {
 
     @Test
-    void testHeartbeatTimeoutThenReconnect() {
+    void testSilentWriterThenResume() {
       final var name = "foo";
       final var histogram =
           metricsRecorder.newHistogram(
@@ -346,23 +346,17 @@ class HistogramMetricTest {
         assertEquals(0, metricsHandler.distinct.getTotalCount(), "distinct.totalCount");
       }
 
-      // Advance for timeout overdue
+      // Silent writer (nothing transmitted) is not a reason to reconnect
+      metricsHandler.reset();
       advanceClock(RESOLUTION * 10);
-      metricsRecorder.agentInvoker().invoke();
-      metricsReaderAgent.doWork();
-      assertEquals(State.CLEANUP, metricsReaderAgent.state(), "metricsReaderAgent.state");
-
-      // Advance for retry overdue
-      advanceClock(RESOLUTION * 10);
-      metricsRecorder.agentInvoker().invoke();
-      metricsReaderAgent.doWork();
-      assertEquals(State.INIT, metricsReaderAgent.state(), "metricsReaderAgent.state");
-
-      // Advance for retry overdue
-      advanceClock(RESOLUTION * 10);
-      metricsRecorder.agentInvoker().invoke();
       metricsReaderAgent.doWork();
       assertEquals(State.RUNNING, metricsReaderAgent.state(), "metricsReaderAgent.state");
+
+      // And once writer transmits again, it's read
+      metricsRecorder.agentInvoker().invoke();
+      advanceClock(RESOLUTION);
+      metricsReaderAgent.doWork();
+      metricsHandler.assertHasRead();
     }
 
     @Test

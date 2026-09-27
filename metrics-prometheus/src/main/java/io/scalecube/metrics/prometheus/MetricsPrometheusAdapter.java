@@ -10,7 +10,7 @@ import java.io.OutputStreamWriter;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.Map;
-import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 import org.HdrHistogram.Histogram;
 import org.agrona.DirectBuffer;
@@ -19,6 +19,10 @@ import org.agrona.DirectBuffer;
  * Adapter that translates metrics (histograms, tps values) into the Prometheus text exposition
  * format. Metrics are being updated via the {@link MetricsHandler} interface and exposed to
  * Prometheus by implementing the {@link PrometheusWriter} contract.
+ *
+ * <p>Per histogram only the exposed values (percentiles, max, count of the distinct histogram) are
+ * kept, computed when the histogram arrives, histograms themselves are not retained. Updates and
+ * {@link #write(OutputStreamWriter)} may run on different threads.
  */
 public class MetricsPrometheusAdapter implements MetricsHandler, PrometheusWriter {
 
@@ -38,9 +42,8 @@ public class MetricsPrometheusAdapter implements MetricsHandler, PrometheusWrite
   private final Map<String, String> tags;
 
   private final KeyCodec keyCodec = new KeyCodec();
-  private final AtomicReference<Map<Key, HistogramItem>> histogramMapReference =
-      new AtomicReference<>();
-  private final AtomicReference<Map<Key, TpsItem>> tpsMapReference = new AtomicReference<>();
+  private final Map<Key, HistogramItem> histograms = new ConcurrentHashMap<>();
+  private final Map<Key, TpsItem> tpsValues = new ConcurrentHashMap<>();
 
   /**
    * Constructor.
@@ -63,20 +66,20 @@ public class MetricsPrometheusAdapter implements MetricsHandler, PrometheusWrite
       double conversionFactor) {
     final var key = keyCodec.decodeKey(keyBuffer, keyOffset);
     final var name = key.stringValue("name");
-    final var tags = toTags(key);
-
     if (name != null) {
-      histogramMapReference.updateAndGet(
-          map -> {
-            if (map == null) {
-              map = new LinkedHashMap<>();
-            }
-            map.put(
-                key,
-                new HistogramItem(
-                    name, tags, accumulated, distinct, highestTrackableValue, conversionFactor));
-            return map;
-          });
+      final var percentileValues = new long[PERCENTILES.length];
+      for (int i = 0; i < PERCENTILES.length; i++) {
+        percentileValues[i] = distinct.getValueAtPercentile(PERCENTILES[i]);
+      }
+      histograms.put(
+          key,
+          new HistogramItem(
+              name,
+              toTags(key),
+              percentileValues,
+              distinct.getMaxValue(),
+              distinct.getTotalCount(),
+              conversionFactor));
     }
   }
 
@@ -85,34 +88,18 @@ public class MetricsPrometheusAdapter implements MetricsHandler, PrometheusWrite
       long timestamp, DirectBuffer keyBuffer, int keyOffset, int keyLength, long value) {
     final var key = keyCodec.decodeKey(keyBuffer, keyOffset);
     final var name = key.stringValue("name");
-    final var tags = toTags(key);
-
     if (name != null) {
-      tpsMapReference.updateAndGet(
-          map -> {
-            if (map == null) {
-              map = new LinkedHashMap<>();
-            }
-            map.put(key, new TpsItem(name, tags, value));
-            return map;
-          });
+      tpsValues.put(key, new TpsItem(name, toTags(key), value));
     }
   }
 
   @Override
   public void write(OutputStreamWriter writer) throws IOException {
-    final var histogramMap = histogramMapReference.get();
-    if (histogramMap != null) {
-      for (var histogramItem : histogramMap.values()) {
-        writeHistogram(writer, histogramItem);
-      }
+    for (var histogramItem : histograms.values()) {
+      writeHistogram(writer, histogramItem);
     }
-
-    final var tpsMap = tpsMapReference.get();
-    if (tpsMap != null) {
-      for (var tpsItem : tpsMap.values()) {
-        writeTps(writer, tpsItem);
-      }
+    for (var tpsItem : tpsValues.values()) {
+      writeTps(writer, tpsItem);
     }
   }
 
@@ -120,16 +107,15 @@ public class MetricsPrometheusAdapter implements MetricsHandler, PrometheusWrite
       throws IOException {
     final var name = histogramItem.name();
     final var conversionFactor = histogramItem.conversionFactor();
-    final var histogram = histogramItem.distinct();
     final var tags = histogramItem.tags();
 
     // Percentile
-    for (double percentile : PERCENTILES) {
+    for (int i = 0; i < PERCENTILES.length; i++) {
       writer
           .append(sanitizeName(name))
-          .append(formatLabels(addTag(tags, "p", formatPercentile(percentile))))
+          .append(formatLabels(addTag(tags, "p", formatPercentile(PERCENTILES[i]))))
           .append(" ")
-          .append(formatDouble(histogram.getValueAtPercentile(percentile) * conversionFactor))
+          .append(formatDouble(histogramItem.percentileValues()[i] * conversionFactor))
           .append("\n");
     }
 
@@ -138,7 +124,7 @@ public class MetricsPrometheusAdapter implements MetricsHandler, PrometheusWrite
         .append(sanitizeName(name))
         .append(formatLabels(addTag(tags, "p", "max")))
         .append(" ")
-        .append(formatDouble(histogram.getMaxValue() * conversionFactor))
+        .append(formatDouble(histogramItem.maxValue() * conversionFactor))
         .append("\n");
 
     // Count
@@ -146,7 +132,7 @@ public class MetricsPrometheusAdapter implements MetricsHandler, PrometheusWrite
         .append(sanitizeName(name + "_count"))
         .append(formatLabels(tags))
         .append(" ")
-        .append(String.valueOf(histogram.getTotalCount()))
+        .append(String.valueOf(histogramItem.totalCount()))
         .append("\n");
   }
 
@@ -218,9 +204,9 @@ public class MetricsPrometheusAdapter implements MetricsHandler, PrometheusWrite
   private record HistogramItem(
       String name,
       Map<String, String> tags,
-      Histogram accumulated,
-      Histogram distinct,
-      long highestTrackableValue,
+      long[] percentileValues,
+      long maxValue,
+      long totalCount,
       double conversionFactor) {}
 
   private record TpsItem(String name, Map<String, String> tags, long value) {}
