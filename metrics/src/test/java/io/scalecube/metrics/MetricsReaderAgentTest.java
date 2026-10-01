@@ -18,7 +18,9 @@ import java.nio.file.StandardCopyOption;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.LongStream;
+import org.HdrHistogram.Histogram;
 import org.agrona.CloseHelper;
 import org.agrona.DirectBuffer;
 import org.agrona.IoUtil;
@@ -27,6 +29,8 @@ import org.agrona.concurrent.UnsafeBuffer;
 import org.agrona.concurrent.broadcast.BroadcastTransmitter;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 class MetricsReaderAgentTest {
 
@@ -216,6 +220,74 @@ class MetricsReaderAgentTest {
       transmitter.transmitTps(3);
       drain(agent);
       assertEquals(List.of(2L, 3L), values);
+    } finally {
+      CloseHelper.quietClose(recorder);
+    }
+  }
+
+  // https://github.com/scalecube/scalecube-metrics/issues/42: up to 0.1.14 reader's liveness
+  // timeout was its retry interval, so with resolution >= that interval it detached between
+  // publishes and re-attached at the tail, losing every other window
+  @ParameterizedTest
+  @ValueSource(longs = {1000, 3000, 6000})
+  void testEveryHistogramWindowIsDeliveredWhenResolutionIsNotBelowReadInterval(
+      long resolutionMs, @TempDir File dir) {
+    final var recorder =
+        MetricsRecorder.launch(
+            new Context()
+                .metricsDirectoryName(dir.getPath())
+                .epochClock(epochClock)
+                .useAgentInvoker(true));
+    try {
+      final var invoker = recorder.agentInvoker();
+      final var histogram =
+          recorder.newHistogram(
+              key -> key.tagsCount(1).stringValue("name", "histogram"), 1000, 1.0, resolutionMs);
+      invoker.invoke(); // register histogram
+
+      final var windows = new AtomicLong();
+      final var distinctCount = new AtomicLong();
+      final var accumulatedCount = new AtomicLong();
+      final var agent =
+          newAgent(
+              dir,
+              new MetricsHandler() {
+                @Override
+                public void onHistogram(
+                    long timestamp,
+                    DirectBuffer keyBuffer,
+                    int keyOffset,
+                    int keyLength,
+                    Histogram accumulated,
+                    Histogram distinct,
+                    long highestTrackableValue,
+                    double conversionFactor) {
+                  windows.incrementAndGet();
+                  distinctCount.addAndGet(distinct.getTotalCount());
+                  accumulatedCount.set(accumulated.getTotalCount());
+                }
+              });
+      agent.doWork(); // attach
+      assertEquals(State.READ_METRICS, agent.state());
+
+      // writer and reader driven off one clock, in steps aligned to neither resolution nor read
+      // interval, so publishes land slightly after their deadline, as with scheduling jitter
+      final var step = 7;
+      final var duration = 20 * Math.max(resolutionMs, RETRY_INTERVAL.toMillis());
+      for (long elapsed = 0; elapsed < duration; elapsed += step) {
+        histogram.record(1);
+        epochClock.advance(step);
+        invoker.invoke();
+        agent.doWork();
+        assertEquals(State.READ_METRICS, agent.state(), "reader never detaches from live writer");
+      }
+      drain(agent);
+
+      assertTrue(windows.get() >= duration / resolutionMs - 1, "windows: " + windows.get());
+      assertEquals(
+          accumulatedCount.get(),
+          distinctCount.get(),
+          "distinct windows add up to accumulated, i.e. no window is lost");
     } finally {
       CloseHelper.quietClose(recorder);
     }
