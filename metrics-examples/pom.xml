@@ -51,10 +51,6 @@
       <artifactId>aeron-all</artifactId>
     </dependency>
     <dependency>
-      <groupId>io.aeron</groupId>
-      <artifactId>aeron-agent</artifactId>
-    </dependency>
-    <dependency>
       <groupId>net.bytebuddy</groupId>
       <artifactId>byte-buddy</artifactId>
     </dependency>
