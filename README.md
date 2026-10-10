@@ -109,6 +109,9 @@ hence the bounds. Shared memory counts only pages the process touched, and a fil
 processes (e.g. an Aeron media driver and its client) counts in both. `statm` is read rather than
 `status`: the kernel builds `status` under the process's signal lock, `statm` from counters.
 
+The JVM refreshes the metaspace values at GC only: they are 0 until the first GC, then hold the value
+of the last GC.
+
 Times are converted from ticks with `sun.os.hrt.frequency`. Shenandoah's collector time includes
 concurrent cycles, for the other collectors it is pause time. The JVM updates values without a lock,
 so one read may mix values from just before and just after a GC: each value is right on its own,
@@ -120,3 +123,7 @@ Parallel), with and without `-XX:+AlwaysPreTouch`, including that a direct buffe
 anonymous and a mapped `/dev/shm` file as shared memory, on the JDK the build runs on, so CI must run
 on the JDK the observed services run on.
 The observed JVM must not run with `-XX:-UsePerfData` or `-XX:+PerfDisableSharedMem`.
+
+Example (`metrics-examples`, Linux): start `io.scalecube.metrics.jvm.JvmMetricsSourceRunner` with
+`-Xmx64m`, a JVM holding a direct buffer and a mapped `/dev/shm` file; it prints its pid. Then
+`io.scalecube.metrics.jvm.JvmMetricsReaderRunner <pid>` prints its JVM metrics every 3 seconds.

@@ -41,7 +41,8 @@ import org.slf4j.LoggerFactory;
  * lower bound (heap committed but never touched is not resident without {@code
  * -XX:+AlwaysPreTouch}), anonymous minus heap used its upper bound. With ZGC, anonymous is the
  * off-heap itself, and mapped files are shared minus the resident heap. Shared counts only pages
- * this process touched, and pages mapped by several processes count in each of them.
+ * this process touched, and pages mapped by several processes count in each of them. The JVM
+ * refreshes metaspace values at GC only (0 before the first GC).
  *
  * <p>Every read interval the file is mapped read-only, parsed and unmapped, nothing is kept between
  * reads. Missing, not yet initialized, or unsupported file results in empty list of counters, so
