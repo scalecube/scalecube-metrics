@@ -6,6 +6,11 @@ import static io.scalecube.metrics.jvm.JvmMetricsReaderAgent.GC_TAG;
 import static io.scalecube.metrics.jvm.JvmMetricsReaderAgent.HEAP_COMMITTED;
 import static io.scalecube.metrics.jvm.JvmMetricsReaderAgent.HEAP_MAX;
 import static io.scalecube.metrics.jvm.JvmMetricsReaderAgent.HEAP_USED;
+import static io.scalecube.metrics.jvm.JvmMetricsReaderAgent.METASPACE_COMMITTED;
+import static io.scalecube.metrics.jvm.JvmMetricsReaderAgent.METASPACE_USED;
+import static io.scalecube.metrics.jvm.JvmMetricsReaderAgent.RESIDENT;
+import static io.scalecube.metrics.jvm.JvmMetricsReaderAgent.RESIDENT_ANON;
+import static io.scalecube.metrics.jvm.JvmMetricsReaderAgent.RESIDENT_SHARED;
 import static io.scalecube.metrics.jvm.JvmMetricsReaderAgent.SAFEPOINTS;
 import static io.scalecube.metrics.jvm.JvmMetricsReaderAgent.SAFEPOINT_SYNC_TIME;
 import static io.scalecube.metrics.jvm.JvmMetricsReaderAgent.SAFEPOINT_TIME;
@@ -27,6 +32,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import org.agrona.UnsafeApi;
 import org.agrona.concurrent.CachedEpochClock;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -58,6 +64,9 @@ class JvmMetricsReaderAgentTest {
                 .longEntry("java.threads.daemon", 15)
                 .longEntry("java.threads.livePeak", 22)
                 .longEntry("java.threads.started", 30)
+                .longEntry("sun.gc.metaspace.used", 7_000)
+                .longEntry("sun.gc.metaspace.capacity", 8_000)
+                .longEntry("sun.gc.metaspace.maxCapacity", Long.MAX_VALUE)
                 .build());
 
     final var expected = new LinkedHashMap<String, Long>();
@@ -75,8 +84,60 @@ class JvmMetricsReaderAgentTest {
     expected.put(THREADS_DAEMON, 15L);
     expected.put(THREADS_PEAK, 22L);
     expected.put(THREADS_STARTED, 30L);
+    expected.put(METASPACE_USED, 7_000L);
+    expected.put(METASPACE_COMMITTED, 8_000L);
 
     assertEquals(expected, toMap(JvmMetricsReaderAgent.toCounters(hsPerfData)));
+  }
+
+  @Test
+  void readsResidentMemoryFromStatm() throws IOException {
+    final var file = new File(tempDir, "1");
+    final var statm = new File(tempDir, "statm");
+    Files.write(file.toPath(), g1().buildBytes());
+    Files.writeString(statm.toPath(), "1000 300 100 5 0 200 0\n");
+    final var agent = newAgent(file, statm);
+
+    agent.doWork();
+
+    final var values = toMap(reads.get(0));
+    final var pageSize = UnsafeApi.pageSize();
+    assertEquals(300L * pageSize, values.get(RESIDENT));
+    assertEquals(200L * pageSize, values.get(RESIDENT_ANON));
+    assertEquals(100L * pageSize, values.get(RESIDENT_SHARED));
+    assertEquals(1000L, values.get(HEAP_COMMITTED));
+  }
+
+  @Test
+  void skipsResidentMemoryWhenStatmMissingOrMalformed() throws IOException {
+    final var file = new File(tempDir, "1");
+    final var statm = new File(tempDir, "statm");
+    Files.write(file.toPath(), g1().buildBytes());
+    final var agent = newAgent(file, statm);
+
+    agent.doWork(); // statm missing: process exited after hsperfdata was read
+    Files.writeString(statm.toPath(), "garbage\n");
+    advanceAndWork(agent);
+    Files.writeString(statm.toPath(), "1000 x 100 5 0 200 0\n");
+    advanceAndWork(agent);
+
+    assertEquals(3, reads.size());
+    for (var read : reads) {
+      final var values = toMap(read);
+      assertEquals(1000L, values.get(HEAP_COMMITTED));
+      assertTrue(!values.containsKey(RESIDENT) && !values.containsKey(RESIDENT_ANON), "" + values);
+    }
+  }
+
+  @Test
+  void reportsNoResidentMemoryWithoutHsperfdata() throws IOException {
+    final var statm = new File(tempDir, "statm");
+    Files.writeString(statm.toPath(), "1000 300 100 5 0 200 0\n");
+    final var agent = newAgent(new File(tempDir, "1"), statm);
+
+    agent.doWork();
+
+    assertEquals(List.of(List.of()), reads);
   }
 
   @Test
@@ -172,9 +233,13 @@ class JvmMetricsReaderAgentTest {
   }
 
   private JvmMetricsReaderAgent newAgent(File file) {
+    return newAgent(file, null);
+  }
+
+  private JvmMetricsReaderAgent newAgent(File file, File statm) {
     final var agent =
         new JvmMetricsReaderAgent(
-            "JvmMetricsReaderAgent", file, false, epochClock, READ_INTERVAL, countersHandler);
+            "JvmMetricsReaderAgent", file, statm, false, epochClock, READ_INTERVAL, countersHandler);
     agent.onStart();
     return agent;
   }

@@ -67,8 +67,9 @@ Unlike `CountersReaderAgent`, the tool prints `PRIVATE`-visibility counters too:
 
 `io.scalecube.metrics.jvm.JvmMetricsReaderAgent` reads JVM metrics of another JVM from its HotSpot
 `hsperfdata` file (`/tmp/hsperfdata_<user>/<pid>`), which every HotSpot JVM writes by default. The
-observed JVM is not touched: no attach, no code injected, no safepoints, no threads. The agent reads
-the one file it is given; finding that file (e.g. through `/proc/<pid>/root`) is up to the caller.
+observed JVM is not touched: no attach, no code injected, no safepoints, no threads. Resident
+memory, including off-heap, comes from the JVM's `/proc/<pid>/statm` (optional). The agent reads
+the files it is given; finding them (e.g. through `/proc/<pid>/root`) is up to the caller.
 
 Every read interval the file is mapped read-only, parsed and unmapped. Values go to a
 `CountersHandler` as `CounterDescriptor`s (metric name as label, `gc` tag for GC metrics), so
@@ -89,6 +90,24 @@ yields an empty list, so the handler never keeps values of a JVM that has gone.
 | `jvm_threads_daemon`                        | `java.threads.daemon`                                   |
 | `jvm_threads_peak`                          | `java.threads.livePeak`                                 |
 | `jvm_threads_started_total`                 | `java.threads.started`                                  |
+| `jvm_memory_metaspace_used_bytes`           | `sun.gc.metaspace.used`                                 |
+| `jvm_memory_metaspace_committed_bytes`      | `sun.gc.metaspace.capacity`                             |
+| `jvm_resident_memory_bytes`                 | `statm` resident                                        |
+| `jvm_resident_memory_anon_bytes`            | `statm` resident − shared                               |
+| `jvm_resident_memory_shared_bytes`          | `statm` shared                                          |
+
+Off-heap memory (direct buffers, Agrona/Aeron off-heap, native) is not measured directly; it is
+derived from resident memory, and which part holds the heap depends on the collector:
+
+| Collector              | Anonymous memory holds                 | Shared memory holds                 | Off-heap                                                                       |
+|------------------------|----------------------------------------|-------------------------------------|--------------------------------------------------------------------------------|
+| G1, Parallel, Serial   | heap + off-heap + metaspace + stacks   | mapped files (e.g. Aeron, `/dev/shm`) | `anon − heap committed` (lower bound) … `anon − heap used` (upper bound)        |
+| ZGC                    | off-heap + metaspace + stacks          | heap + mapped files                 | `anon`                                                                         |
+
+Heap committed but never touched is not resident unless the JVM runs with `-XX:+AlwaysPreTouch`,
+hence the bounds. Shared memory counts only pages the process touched, and a file mapped by two
+processes (e.g. an Aeron media driver and its client) counts in both. `statm` is read rather than
+`status`: the kernel builds `status` under the process's signal lock, `statm` from counters.
 
 Times are converted from ticks with `sun.os.hrt.frequency`. Shenandoah's collector time includes
 concurrent cycles, for the other collectors it is pause time. The JVM updates values without a lock,
@@ -97,5 +116,7 @@ don't alert on a relation between two values of the same read.
 
 The counter names are JDK internals and may change in any JDK release.
 `JvmMetricsReaderAgentJdkTest` checks every metric against a child JVM per collector (G1, ZGC,
-Parallel) on the JDK the build runs on, so CI must run on the JDK the observed services run on.
+Parallel), with and without `-XX:+AlwaysPreTouch`, including that a direct buffer shows up as
+anonymous and a mapped `/dev/shm` file as shared memory, on the JDK the build runs on, so CI must run
+on the JDK the observed services run on.
 The observed JVM must not run with `-XX:-UsePerfData` or `-XX:+PerfDisableSharedMem`.

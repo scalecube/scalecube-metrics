@@ -6,8 +6,11 @@ import io.scalecube.metrics.CounterDescriptor;
 import io.scalecube.metrics.CountersHandler;
 import io.scalecube.metrics.KeyFlyweight;
 import java.io.File;
+import java.io.IOException;
 import java.nio.MappedByteBuffer;
 import java.nio.channels.FileChannel.MapMode;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -16,6 +19,7 @@ import java.util.TreeMap;
 import java.util.regex.Pattern;
 import org.agrona.BufferUtil;
 import org.agrona.ExpandableArrayBuffer;
+import org.agrona.UnsafeApi;
 import org.agrona.concurrent.Agent;
 import org.agrona.concurrent.EpochClock;
 import org.agrona.concurrent.UnsafeBuffer;
@@ -23,9 +27,21 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * Agent that periodically reads JVM metrics (safepoints, GC, heap, threads) from HotSpot {@code
- * hsperfdata} file of another JVM (see {@link HsPerfData}), and invokes {@link CountersHandler}
- * with them. The observed JVM is not touched: no attach, no code, no safepoints, no threads.
+ * Agent that periodically reads JVM metrics (safepoints, GC, heap, metaspace, threads) from HotSpot
+ * {@code hsperfdata} file of another JVM (see {@link HsPerfData}), plus its resident memory from
+ * {@code /proc/<pid>/statm}, and invokes {@link CountersHandler} with them. The observed JVM is not
+ * touched: no attach, no code, no safepoints, no threads. Reading {@code statm} only takes the
+ * kernel's per-task {@code task_lock} of the main thread for an instant to get its {@code mm}, and
+ * then reads counters; {@code /proc/<pid>/status} would also take the process's signal lock.
+ *
+ * <p>Resident memory splits into anonymous (direct buffers, Agrona/Aeron off-heap, metaspace,
+ * thread stacks, native, and the heap of G1/Parallel/Serial) and shared (memory-mapped files, e.g.
+ * Aeron log buffers in {@code /dev/shm}, and the heap of ZGC, which is backed by shared memory).
+ * Off-heap is not measured directly. With G1/Parallel/Serial, anonymous minus heap committed is its
+ * lower bound (heap committed but never touched is not resident without {@code
+ * -XX:+AlwaysPreTouch}), anonymous minus heap used its upper bound. With ZGC, anonymous is the
+ * off-heap itself, and mapped files are shared minus the resident heap. Shared counts only pages
+ * this process touched, and pages mapped by several processes count in each of them.
  *
  * <p>Every read interval the file is mapped read-only, parsed and unmapped, nothing is kept between
  * reads. Missing, not yet initialized, or unsupported file results in empty list of counters, so
@@ -52,9 +68,15 @@ public class JvmMetricsReaderAgent implements Agent {
   public static final String THREADS_DAEMON = "jvm_threads_daemon";
   public static final String THREADS_PEAK = "jvm_threads_peak";
   public static final String THREADS_STARTED = "jvm_threads_started_total";
+  public static final String METASPACE_USED = "jvm_memory_metaspace_used_bytes";
+  public static final String METASPACE_COMMITTED = "jvm_memory_metaspace_committed_bytes";
+  public static final String RESIDENT = "jvm_resident_memory_bytes";
+  public static final String RESIDENT_ANON = "jvm_resident_memory_anon_bytes";
+  public static final String RESIDENT_SHARED = "jvm_resident_memory_shared_bytes";
   public static final String GC_TAG = "gc";
 
   private static final long NANOS_PER_SECOND = 1_000_000_000L;
+  private static final long PAGE_SIZE = UnsafeApi.pageSize();
   private static final Pattern COLLECTOR_INVOCATIONS =
       Pattern.compile("sun\\.gc\\.collector\\.(\\d+)\\.invocations");
   private static final Pattern GENERATION_CAPACITY =
@@ -66,6 +88,7 @@ public class JvmMetricsReaderAgent implements Agent {
 
   private final String roleName;
   private final File hsperfdataFile;
+  private final File statmFile;
   private final boolean warnIfNotExists;
   private final EpochClock epochClock;
   private final long readInterval;
@@ -78,6 +101,8 @@ public class JvmMetricsReaderAgent implements Agent {
    *
    * @param roleName roleName
    * @param hsperfdataFile {@code hsperfdata} file of the observed JVM
+   * @param statmFile {@code /proc/<pid>/statm} file of the observed JVM, or null to skip resident
+   *     memory metrics
    * @param warnIfNotExists whether to log warning if {@code hsperfdata} file does not exist
    * @param epochClock epochClock
    * @param readInterval interval at which to read {@code hsperfdata} file
@@ -86,12 +111,14 @@ public class JvmMetricsReaderAgent implements Agent {
   public JvmMetricsReaderAgent(
       String roleName,
       File hsperfdataFile,
+      File statmFile,
       boolean warnIfNotExists,
       EpochClock epochClock,
       Duration readInterval,
       CountersHandler countersHandler) {
     this.roleName = roleName;
     this.hsperfdataFile = hsperfdataFile;
+    this.statmFile = statmFile;
     this.warnIfNotExists = warnIfNotExists;
     this.epochClock = epochClock;
     this.readInterval = readInterval.toMillis();
@@ -134,7 +161,14 @@ public class JvmMetricsReaderAgent implements Agent {
 
     try {
       final var hsPerfData = HsPerfData.parse(new UnsafeBuffer(byteBuffer));
-      return hsPerfData != null ? toCounters(hsPerfData) : List.of();
+      if (hsPerfData == null) {
+        return List.of();
+      }
+      final var counters = toCounters(hsPerfData);
+      if (statmFile != null) {
+        addResidentMemory(counters, readStatm());
+      }
+      return counters;
     } catch (IllegalArgumentException e) {
       LOGGER.warn("[{}] {} unsupported: {}", roleName, hsperfdataFile, e.getMessage());
       return List.of();
@@ -167,7 +201,42 @@ public class JvmMetricsReaderAgent implements Agent {
     add(counters, THREADS_PEAK, null, longs.get("java.threads.livePeak"));
     add(counters, THREADS_STARTED, null, longs.get("java.threads.started"));
 
+    add(counters, METASPACE_USED, null, longs.get("sun.gc.metaspace.used"));
+    add(counters, METASPACE_COMMITTED, null, longs.get("sun.gc.metaspace.capacity"));
+
     return counters;
+  }
+
+  private String readStatm() {
+    try {
+      return Files.readString(statmFile.toPath(), StandardCharsets.US_ASCII);
+    } catch (IOException e) {
+      // the process exited after hsperfdata was read
+      LOGGER.debug("[{}] cannot read {}: {}", roleName, statmFile, e.toString());
+      return null;
+    }
+  }
+
+  // "size resident shared text lib data dt", in pages
+  static void addResidentMemory(List<CounterDescriptor> counters, String statm) {
+    if (statm == null) {
+      return;
+    }
+    final var fields = statm.trim().split("\\s+");
+    if (fields.length < 3) {
+      return;
+    }
+    final long resident;
+    final long shared;
+    try {
+      resident = Long.parseLong(fields[1]) * PAGE_SIZE;
+      shared = Long.parseLong(fields[2]) * PAGE_SIZE;
+    } catch (NumberFormatException e) {
+      return;
+    }
+    add(counters, RESIDENT, null, resident);
+    add(counters, RESIDENT_ANON, null, resident - shared);
+    add(counters, RESIDENT_SHARED, null, shared);
   }
 
   // Collector indices are not contiguous (ZGC has 0 and 2), so take the ones that exist

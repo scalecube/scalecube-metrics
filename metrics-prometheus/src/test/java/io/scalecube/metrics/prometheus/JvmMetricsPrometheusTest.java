@@ -34,6 +34,7 @@ class JvmMetricsPrometheusTest {
             new File(
                 "/tmp/hsperfdata_" + System.getProperty("user.name"),
                 String.valueOf(ProcessHandle.current().pid())),
+            new File("/proc/self/statm"),
             true,
             SystemEpochClock.INSTANCE,
             Duration.ofSeconds(3),
@@ -77,7 +78,12 @@ class JvmMetricsPrometheusTest {
             "jvm_threads_live",
             "jvm_threads_daemon",
             "jvm_threads_peak",
-            "jvm_threads_started_total"),
+            "jvm_threads_started_total",
+            "jvm_memory_metaspace_used_bytes",
+            "jvm_memory_metaspace_committed_bytes",
+            "jvm_resident_memory_bytes",
+            "jvm_resident_memory_anon_bytes",
+            "jvm_resident_memory_shared_bytes"),
         names);
   }
 

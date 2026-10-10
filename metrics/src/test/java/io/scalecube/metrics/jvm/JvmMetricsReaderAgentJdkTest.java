@@ -5,6 +5,11 @@ import static io.scalecube.metrics.jvm.JvmMetricsReaderAgent.GC_PAUSE;
 import static io.scalecube.metrics.jvm.JvmMetricsReaderAgent.HEAP_COMMITTED;
 import static io.scalecube.metrics.jvm.JvmMetricsReaderAgent.HEAP_MAX;
 import static io.scalecube.metrics.jvm.JvmMetricsReaderAgent.HEAP_USED;
+import static io.scalecube.metrics.jvm.JvmMetricsReaderAgent.METASPACE_COMMITTED;
+import static io.scalecube.metrics.jvm.JvmMetricsReaderAgent.METASPACE_USED;
+import static io.scalecube.metrics.jvm.JvmMetricsReaderAgent.RESIDENT;
+import static io.scalecube.metrics.jvm.JvmMetricsReaderAgent.RESIDENT_ANON;
+import static io.scalecube.metrics.jvm.JvmMetricsReaderAgent.RESIDENT_SHARED;
 import static io.scalecube.metrics.jvm.JvmMetricsReaderAgent.SAFEPOINTS;
 import static io.scalecube.metrics.jvm.JvmMetricsReaderAgent.SAFEPOINT_SYNC_TIME;
 import static io.scalecube.metrics.jvm.JvmMetricsReaderAgent.SAFEPOINT_TIME;
@@ -31,16 +36,18 @@ import java.util.Set;
 import java.util.stream.Collectors;
 import org.agrona.concurrent.CachedEpochClock;
 import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.ValueSource;
+import org.junit.jupiter.params.provider.CsvSource;
 
 /**
  * Guard against JDK changes: hsperfdata counter names are JDK internals and may change in any JDK
  * release. Runs on the JDK the build runs on, so CI must use the JDK the services run on. Starts a
- * child JVM per collector, reads its hsperfdata file and compares with the child's own values.
+ * child JVM per collector, with and without heap pre-touch, reads its hsperfdata and statm files and
+ * compares with the child's own values; off-heap allocations and mapped files must show up.
  */
 class JvmMetricsReaderAgentJdkTest {
 
   private static final long MAX_HEAP = 256L * 1024 * 1024;
+  private static final long OFF_HEAP_MIN_GROWTH = ChildJvm.OFF_HEAP_SIZE * 7L / 8;
   private static final Duration READ_INTERVAL = Duration.ofSeconds(1);
   private static final Set<String> SCALAR_METRICS =
       Set.of(
@@ -53,18 +60,31 @@ class JvmMetricsReaderAgentJdkTest {
           THREADS_LIVE,
           THREADS_DAEMON,
           THREADS_PEAK,
-          THREADS_STARTED);
+          THREADS_STARTED,
+          METASPACE_USED,
+          METASPACE_COMMITTED,
+          RESIDENT,
+          RESIDENT_ANON,
+          RESIDENT_SHARED);
 
   private final CachedEpochClock epochClock = new CachedEpochClock();
   private List<CounterDescriptor> lastRead;
 
   @ParameterizedTest
-  @ValueSource(strings = {"-XX:+UseG1GC", "-XX:+UseZGC", "-XX:+UseParallelGC"})
-  void readsAllMetricsOfRunningJvm(String gcFlag) throws Exception {
+  @CsvSource({
+    "-XX:+UseG1GC, -XX:-AlwaysPreTouch",
+    "-XX:+UseG1GC, -XX:+AlwaysPreTouch",
+    "-XX:+UseZGC, -XX:-AlwaysPreTouch",
+    "-XX:+UseZGC, -XX:+AlwaysPreTouch",
+    "-XX:+UseParallelGC, -XX:-AlwaysPreTouch",
+    "-XX:+UseParallelGC, -XX:+AlwaysPreTouch"
+  })
+  void readsAllMetricsOfRunningJvm(String gcFlag, String preTouchFlag) throws Exception {
     final var process =
         new ProcessBuilder(
                 Path.of(System.getProperty("java.home"), "bin", "java").toString(),
                 gcFlag,
+                preTouchFlag,
                 "-Xmx" + MAX_HEAP,
                 "-cp",
                 Path.of(ChildJvm.class.getProtectionDomain().getCodeSource().getLocation().toURI())
@@ -80,13 +100,42 @@ class JvmMetricsReaderAgentJdkTest {
       final var file =
           new File(
               "/tmp/hsperfdata_" + System.getProperty("user.name"), String.valueOf(process.pid()));
+      final var statm = new File("/proc/" + process.pid() + "/statm");
       final var agent =
           new JvmMetricsReaderAgent(
-              "JvmMetricsReaderAgent", file, true, epochClock, READ_INTERVAL, countersHandler());
+              "JvmMetricsReaderAgent",
+              file,
+              statm,
+              true,
+              epochClock,
+              READ_INTERVAL,
+              countersHandler());
       agent.onStart();
 
       final var before = readUntilPresent(agent);
       assertAllMetricsPresent(before);
+      assertEquals(
+          before.get(RESIDENT), before.get(RESIDENT_ANON) + before.get(RESIDENT_SHARED), "rss");
+      if (preTouchFlag.equals("-XX:+AlwaysPreTouch")) {
+        // whole committed heap is resident: in anon, except ZGC, whose heap is shared memory
+        final var heapIn = gcFlag.equals("-XX:+UseZGC") ? RESIDENT_SHARED : RESIDENT_ANON;
+        assertTrue(before.get(heapIn) >= before.get(HEAP_COMMITTED), heapIn + ": " + before);
+      }
+
+      // before any GC: G1 shrinks and uncommits the heap after a full GC, which moves anon
+      out.println("direct");
+      assertEquals("ok", in.readLine());
+      final var afterDirect = read(agent);
+      assertTrue(
+          afterDirect.get(RESIDENT_ANON) - before.get(RESIDENT_ANON) >= OFF_HEAP_MIN_GROWTH,
+          "direct buffer not in anon: " + before + " -> " + afterDirect);
+
+      out.println("mmap");
+      assertEquals("ok", in.readLine());
+      final var afterMmap = read(agent);
+      assertTrue(
+          afterMmap.get(RESIDENT_SHARED) - afterDirect.get(RESIDENT_SHARED) >= OFF_HEAP_MIN_GROWTH,
+          "mapped file not in shared: " + afterDirect + " -> " + afterMmap);
 
       out.println("gc");
       assertEquals("ok", in.readLine());
@@ -110,6 +159,9 @@ class JvmMetricsReaderAgentJdkTest {
       assertWithin(stats[3], after.get(THREADS_DAEMON), 2, "threads daemon");
       assertWithin(stats[4], after.get(THREADS_PEAK), 2, "threads peak");
       assertWithin(stats[5], after.get(THREADS_STARTED), 2, "threads started");
+
+      assertTrue(after.get(METASPACE_USED) > 0, "metaspace used");
+      assertTrue(after.get(METASPACE_COMMITTED) >= after.get(METASPACE_USED), "metaspace");
     } finally {
       process.destroyForcibly().waitFor();
     }
