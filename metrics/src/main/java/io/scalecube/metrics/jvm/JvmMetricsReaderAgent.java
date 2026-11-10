@@ -60,7 +60,7 @@ public class JvmMetricsReaderAgent implements Agent {
   public static final String SAFEPOINTS = "jvm_safepoints_total";
   public static final String SAFEPOINT_TIME = "jvm_safepoint_time_nanoseconds_total";
   public static final String SAFEPOINT_SYNC_TIME = "jvm_safepoint_sync_time_nanoseconds_total";
-  public static final String GC_COLLECTIONS = "jvm_gc_collections_total";
+  public static final String GC_PAUSES = "jvm_gc_pauses_total";
   public static final String GC_PAUSE = "jvm_gc_pause_nanoseconds_total";
   public static final String HEAP_USED = "jvm_memory_heap_used_bytes";
   public static final String HEAP_COMMITTED = "jvm_memory_heap_committed_bytes";
@@ -255,7 +255,7 @@ public class JvmMetricsReaderAgent implements Agent {
     collectors.forEach((index, prefix) -> {
       final var gc = hsPerfData.strings().get(prefix + ".name");
       if (gc != null) {
-        add(counters, GC_COLLECTIONS, gc, longs.get(prefix + ".invocations"));
+        add(counters, GC_PAUSES, gc, longs.get(prefix + ".invocations"));
         add(counters, GC_PAUSE, gc, toNanos(longs.get(prefix + ".time"), frequency));
       }
     });

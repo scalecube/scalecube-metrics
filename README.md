@@ -158,10 +158,10 @@ than cores).
 
 ### GC metrics
 
-**Metric:** `jvm_gc_collections_total{gc}`, **Source:** `sun.gc.collector.N.invocations`, **Type:** counter\
+**Metric:** `jvm_gc_pauses_total{gc}`, **Source:** `sun.gc.collector.N.invocations`, **Type:** counter\
 **Usage:**
-- `rate(jvm_gc_collections_total[1m])`: pauses per second, per collector
-- `increase(jvm_gc_collections_total{gc=~".*full.*"}[1h]) > 0`: a full GC happened in the last hour
+- `rate(jvm_gc_pauses_total[1m])`: pauses per second, per collector
+- `increase(jvm_gc_pauses_total{gc=~".*full.*"}[1h]) > 0`: a full GC happened in the last hour
 
 **Description:** Pauses per collector. For young and full collectors one pause is one collection;
 G1's concurrent cycle and ZGC have several pauses per collection. `gc` is `sun.gc.collector.N.name`:
@@ -182,10 +182,10 @@ collections; it is not covered by the tests.
 **Metric:** `jvm_gc_pause_nanoseconds_total{gc}`, **Source:** `sun.gc.collector.N.time`, **Type:** counter\
 **Usage:**
 - `rate(jvm_gc_pause_nanoseconds_total[1m]) / 1e9`: share of time in GC pauses, per collector
-- `rate(jvm_gc_pause_nanoseconds_total[5m]) / rate(jvm_gc_collections_total[5m]) / 1e6`: average
+- `rate(jvm_gc_pause_nanoseconds_total[5m]) / rate(jvm_gc_pauses_total[5m]) / 1e6`: average
   pause, ms, per collector
 
-**Description:** Total time of the pauses counted in `jvm_gc_collections_total`. Concurrent work
+**Description:** Total time of the pauses counted in `jvm_gc_pauses_total`. Concurrent work
 (G1's marking, almost all of ZGC's work) runs beside the application and is not included. A total
 only: no maximum or distribution of single pauses, so one long pause shows as a spike of the rate,
 not as its length; GC logs or JFR have each pause. Shenandoah: includes concurrent work, see above.

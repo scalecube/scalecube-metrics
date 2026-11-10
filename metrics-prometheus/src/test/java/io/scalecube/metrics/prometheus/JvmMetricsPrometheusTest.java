@@ -70,7 +70,7 @@ class JvmMetricsPrometheusTest {
             "jvm_safepoints_total",
             "jvm_safepoint_time_nanoseconds_total",
             "jvm_safepoint_sync_time_nanoseconds_total",
-            "jvm_gc_collections_total",
+            "jvm_gc_pauses_total",
             "jvm_gc_pause_nanoseconds_total",
             "jvm_memory_heap_used_bytes",
             "jvm_memory_heap_committed_bytes",

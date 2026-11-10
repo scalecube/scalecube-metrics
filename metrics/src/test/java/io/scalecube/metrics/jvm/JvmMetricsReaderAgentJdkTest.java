@@ -1,6 +1,6 @@
 package io.scalecube.metrics.jvm;
 
-import static io.scalecube.metrics.jvm.JvmMetricsReaderAgent.GC_COLLECTIONS;
+import static io.scalecube.metrics.jvm.JvmMetricsReaderAgent.GC_PAUSES;
 import static io.scalecube.metrics.jvm.JvmMetricsReaderAgent.GC_PAUSE;
 import static io.scalecube.metrics.jvm.JvmMetricsReaderAgent.HEAP_COMMITTED;
 import static io.scalecube.metrics.jvm.JvmMetricsReaderAgent.HEAP_MAX;
@@ -82,9 +82,8 @@ import org.junit.jupiter.params.provider.CsvSource;
  *       ({@link #derivesEveryMetricFromCountersAsDocumented()});
  *   <li>safepoints: {@code HotspotRuntimeMBean}, count equal, times within 1 ms ({@link
  *       #safepointsMatchJvmOwnCounters()});
- *   <li>GC collections and pauses: {@code GarbageCollectorMXBean}s after every collector has run,
- *       count equal, time within 1 ms per pause ({@link
- *       #gcCollectionsAndPausesMatchJvmOwnCollectors()});
+ *   <li>GC pauses: {@code GarbageCollectorMXBean}s after every collector has run, count equal,
+ *       time within 1 ms per pause ({@link #gcPausesMatchJvmOwnCollectors()});
  *   <li>threads: {@code ThreadMXBean} after starting threads, equal ({@link
  *       #threadsMatchThreadMxBean()});
  *   <li>heap committed: heap {@code MemoryPoolMXBean}s, equal ({@link
@@ -92,8 +91,10 @@ import org.junit.jupiter.params.provider.CsvSource;
  *   <li>heap max: {@code -Xmx}, equal ({@link #heapMaxIsXmx()});
  *   <li>heap used: 64 MB made live, then garbage, followed at GC ({@link
  *       #heapUsedFollowsLiveData()});
- *   <li>metaspace: classes loaded, as measured by the target JVM, within 1 MB at GC ({@link
+ *   <li>metaspace used: classes loaded, as measured by the target JVM, within 1 MB at GC ({@link
  *       #metaspaceFollowsClassLoading()});
+ *   <li>metaspace committed: Metaspace {@code MemoryPoolMXBean} right after a GC, equal ({@link
+ *       #metaspaceCommittedMatchesJvmOwnValue()});
  *   <li>resident: {@code /proc/<pid>/status} {@code VmRSS}, {@code RssAnon}, {@code RssFile +
  *       RssShmem}, equal ({@link #residentMemoryMatchesKernelAccounting()}). The agent reads {@code
  *       statm}, so it is not checked against its own input: {@code status} is a separate file over
@@ -284,7 +285,7 @@ class JvmMetricsReaderAgentJdkTest {
       if (COLLECTOR_NAME.matcher(name).matches()) {
         final var prefix = name.substring(0, name.length() - ".name".length());
         final var gc = "{gc=" + value + "}";
-        expected.put(GC_COLLECTIONS + gc, (Long) jdk.get(prefix + ".invocations"));
+        expected.put(GC_PAUSES + gc, (Long) jdk.get(prefix + ".invocations"));
         expected.put(GC_PAUSE + gc, nanos((Long) jdk.get(prefix + ".time"), frequency));
       }
     });
@@ -300,7 +301,7 @@ class JvmMetricsReaderAgentJdkTest {
 
     expected.forEach((metric, value) -> assertNotNull(value, "no counter for " + metric));
     assertTrue(expected.keySet().containsAll(METRICS_FROM_HSPERFDATA));
-    assertTrue(expected.keySet().stream().anyMatch(name -> name.startsWith(GC_COLLECTIONS)));
+    assertTrue(expected.keySet().stream().anyMatch(name -> name.startsWith(GC_PAUSES)));
 
     final var snapshotAgent = newAgent(snapshot.toFile(), null);
     assertEquals(expected, read(snapshotAgent));
@@ -325,7 +326,7 @@ class JvmMetricsReaderAgentJdkTest {
   // encloses the MXBean one by a few microseconds per pause, measured 1-4 us; 1 ms per pause is
   // allowed, a wrong unit is off by 1000x
   @Test
-  void gcCollectionsAndPausesMatchJvmOwnCollectors() throws Exception {
+  void gcPausesMatchJvmOwnCollectors() throws Exception {
     call("churn");
     final var collectors =
         await(
@@ -338,7 +339,7 @@ class JvmMetricsReaderAgentJdkTest {
                       if (mxBean == null) {
                         return false;
                       }
-                      final var count = values.get(GC_COLLECTIONS + "{gc=" + gc + "}");
+                      final var count = values.get(GC_PAUSES + "{gc=" + gc + "}");
                       final var pause = values.get(GC_PAUSE + "{gc=" + gc + "}");
                       final var mxCount = stats.get("gc." + mxBean + ".count");
                       final var mxTimeMs = stats.get("gc." + mxBean + ".timeMs");
@@ -413,6 +414,17 @@ class JvmMetricsReaderAgentJdkTest {
                 && values.get(METASPACE_COMMITTED) >= values.get(METASPACE_USED));
   }
 
+  // hsperfdata metaspace is refreshed at GC only: the target JVM runs one, then reads its own
+  // Metaspace MemoryPoolMXBean. Until a read follows that GC, the agent shows the previous one.
+  @Test
+  void metaspaceCommittedMatchesJvmOwnValue() throws Exception {
+    await(
+        "metaspace committed",
+        () -> stats("metaspace"),
+        (values, metaspace) ->
+            values.get(METASPACE_COMMITTED).equals(metaspace.get("metaspaceCommitted")));
+  }
+
   @Test
   void residentMemoryMatchesKernelAccounting() throws Exception {
     final var status = new File("/proc/" + process.pid() + "/status");
@@ -463,9 +475,13 @@ class JvmMetricsReaderAgentJdkTest {
   }
 
   private Map<String, Long> stats() {
+    return stats("stats");
+  }
+
+  private Map<String, Long> stats(String command) {
     try {
       final var stats = new HashMap<String, Long>();
-      for (var pair : call("stats").split("\t")) {
+      for (var pair : call(command).split("\t")) {
         final var separator = pair.lastIndexOf('=');
         stats.put(pair.substring(0, separator), Long.parseLong(pair.substring(separator + 1)));
       }
@@ -526,8 +542,8 @@ class JvmMetricsReaderAgentJdkTest {
 
   private static Set<String> collectors(Map<String, Long> values) {
     return values.keySet().stream()
-        .filter(name -> name.startsWith(GC_COLLECTIONS + "{gc="))
-        .map(name -> name.substring((GC_COLLECTIONS + "{gc=").length(), name.length() - 1))
+        .filter(name -> name.startsWith(GC_PAUSES + "{gc="))
+        .map(name -> name.substring((GC_PAUSES + "{gc=").length(), name.length() - 1))
         .collect(Collectors.toSet());
   }
 

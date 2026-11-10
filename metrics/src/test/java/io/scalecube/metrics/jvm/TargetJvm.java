@@ -87,6 +87,7 @@ public class TargetJvm {
           reply = "ok";
         }
         case "stats" -> reply = format(stats());
+        case "metaspace" -> reply = format(metaspaceAfterGc());
         default -> reply = "unknown command: " + line;
       }
       System.out.println(reply);
@@ -159,6 +160,16 @@ public class TargetJvm {
       retained.add(lookup.defineHiddenClass(bytes, false).lookupClass());
     }
     return metaspace.getUsage().getUsed() - before;
+  }
+
+  // hsperfdata metaspace values are refreshed at GC, so the pool is read right after one
+  private static Map<String, Long> metaspaceAfterGc() {
+    System.gc();
+    final var usage = metaspacePool().getUsage();
+    final var metaspace = new LinkedHashMap<String, Long>();
+    metaspace.put("metaspaceUsed", usage.getUsed());
+    metaspace.put("metaspaceCommitted", usage.getCommitted());
+    return metaspace;
   }
 
   private static MemoryPoolMXBean metaspacePool() {

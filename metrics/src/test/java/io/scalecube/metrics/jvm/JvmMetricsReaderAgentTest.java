@@ -1,6 +1,6 @@
 package io.scalecube.metrics.jvm;
 
-import static io.scalecube.metrics.jvm.JvmMetricsReaderAgent.GC_COLLECTIONS;
+import static io.scalecube.metrics.jvm.JvmMetricsReaderAgent.GC_PAUSES;
 import static io.scalecube.metrics.jvm.JvmMetricsReaderAgent.GC_PAUSE;
 import static io.scalecube.metrics.jvm.JvmMetricsReaderAgent.GC_TAG;
 import static io.scalecube.metrics.jvm.JvmMetricsReaderAgent.HEAP_COMMITTED;
@@ -73,9 +73,9 @@ class JvmMetricsReaderAgentTest {
     expected.put(SAFEPOINTS, 7L);
     expected.put(SAFEPOINT_TIME, 1_500_000L);
     expected.put(SAFEPOINT_SYNC_TIME, 3_000L);
-    expected.put(GC_COLLECTIONS + "{gc=G1 young collection pauses}", 10L);
+    expected.put(GC_PAUSES + "{gc=G1 young collection pauses}", 10L);
     expected.put(GC_PAUSE + "{gc=G1 young collection pauses}", 50_000L);
-    expected.put(GC_COLLECTIONS + "{gc=G1 full collection pauses}", 1L);
+    expected.put(GC_PAUSES + "{gc=G1 full collection pauses}", 1L);
     expected.put(GC_PAUSE + "{gc=G1 full collection pauses}", 200_000L);
     expected.put(HEAP_USED, 100L + 10L + 300L);
     expected.put(HEAP_COMMITTED, 400L + 600L);
@@ -155,9 +155,9 @@ class JvmMetricsReaderAgentTest {
                 .build());
 
     final var expected = new LinkedHashMap<String, Long>();
-    expected.put(GC_COLLECTIONS + "{gc=ZGC Minor Pauses}", 1L);
+    expected.put(GC_PAUSES + "{gc=ZGC Minor Pauses}", 1L);
     expected.put(GC_PAUSE + "{gc=ZGC Minor Pauses}", 10L);
-    expected.put(GC_COLLECTIONS + "{gc=ZGC Major Pauses}", 2L);
+    expected.put(GC_PAUSES + "{gc=ZGC Major Pauses}", 2L);
     expected.put(GC_PAUSE + "{gc=ZGC Major Pauses}", 20L);
 
     assertEquals(expected, toMap(JvmMetricsReaderAgent.toCounters(hsPerfData)));
