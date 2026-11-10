@@ -114,10 +114,14 @@ Times are in nanoseconds, sizes in bytes. A counter only grows (use `rate` or `i
 is the current value. Exposed with no `# TYPE`, so Prometheus takes them as untyped; the functions
 below work the same.
 
+The collector decides how several metrics behave. ZGC (generational, JDK 25) comes first below; G1,
+Parallel and Serial follow where they differ.
+
 ### Safepoint metrics
 
 **Metric:** `jvm_safepoints_total`, **Source:** `sun.rt.safepoints`, **Type:** counter\
 **Usage:**
+
 - `rate(jvm_safepoints_total[1m])`: safepoints per second
 - `increase(jvm_safepoints_total[1h])`: safepoints in the last hour
 
@@ -128,10 +132,13 @@ collector (ZGC's short ones included), class redefinition (agents, hot swap), th
 
 ---
 
-**Metric:** `jvm_safepoint_time_nanoseconds_total`, **Source:** `sun.rt.safepointTime`, **Type:** counter\
+**Metric:** `jvm_safepoint_time_nanoseconds_total`, **Source:** `sun.rt.safepointTime`, **Type:**
+counter\
 **Usage:**
-- `(rate(jvm_safepoint_time_nanoseconds_total[1m]) + rate(jvm_safepoint_sync_time_nanoseconds_total[1m])) / 1e9`:
-  share of time the application was stopped (0.01 = 1%)
+
+-
+`(rate(jvm_safepoint_time_nanoseconds_total[1m]) + rate(jvm_safepoint_sync_time_nanoseconds_total[1m])) / 1e9`:
+share of time the application was stopped (0.01 = 1%)
 - `rate(jvm_safepoint_time_nanoseconds_total[5m]) / rate(jvm_safepoints_total[5m]) / 1e6`: average
   time at a safepoint, ms
 
@@ -143,12 +150,15 @@ a safepoint, and stop only when they return to Java.
 
 ---
 
-**Metric:** `jvm_safepoint_sync_time_nanoseconds_total`, **Source:** `sun.rt.safepointSyncTime`, **Type:** counter\
+**Metric:** `jvm_safepoint_sync_time_nanoseconds_total`, **Source:** `sun.rt.safepointSyncTime`,
+**Type:** counter\
 **Usage:**
+
 - `rate(jvm_safepoint_sync_time_nanoseconds_total[5m]) / rate(jvm_safepoints_total[5m]) / 1e6`:
   average time to safepoint, ms
-- `rate(jvm_safepoint_sync_time_nanoseconds_total[5m]) > rate(jvm_safepoint_time_nanoseconds_total[5m])`:
-  threads wait longer for the safepoint than at it
+-
+`rate(jvm_safepoint_sync_time_nanoseconds_total[5m]) > rate(jvm_safepoint_time_nanoseconds_total[5m])`:
+threads wait longer for the safepoint than at it
 
 **Description:** Time from requesting a safepoint until the last Java thread stopped (time to
 safepoint). The threads that stopped first wait for the last one, so this is pause time too. High
@@ -158,19 +168,25 @@ than cores).
 
 ### GC metrics
 
-**Metric:** `jvm_gc_pauses_total{gc}`, **Source:** `sun.gc.collector.N.invocations`, **Type:** counter\
+**Metric:** `jvm_gc_pauses_total{gc}`, **Source:** `sun.gc.collector.N.invocations`, **Type:**
+counter\
 **Usage:**
+
 - `rate(jvm_gc_pauses_total[1m])`: pauses per second, per collector
 - `increase(jvm_gc_pauses_total{gc=~".*full.*"}[1h]) > 0`: a full GC happened in the last hour
 
-**Description:** Pauses per collector. For young and full collectors one pause is one collection;
-G1's concurrent cycle and ZGC have several pauses per collection. `gc` is `sun.gc.collector.N.name`:
+**Description:** Pauses per collector. ZGC and G1's concurrent cycle have several pauses per
+collection; for young and full collectors one pause is one collection. Each pause is one safepoint.
+`gc` is `sun.gc.collector.N.name`:
+
+- `ZGC minor collection pauses`: 3 per minor (young) collection
+- `ZGC major collection pauses`: about 5 per major (young and old) collection; `System.gc()` runs
+  one. hsperfdata has no count of ZGC collections (cycles) or of their concurrent time: divide the
+  pauses
 - `G1 young collection pauses`: young pauses, concurrent start and mixed ones included
 - `G1 full collection pauses`: full collections, `System.gc()` included (unless
   `-XX:+ExplicitGCInvokesConcurrent`); the JDK calls it itself when direct memory runs out
 - `G1 concurrent cycle pauses`: remark and cleanup, 2 per concurrent cycle
-- `ZGC minor collection pauses`, `ZGC major collection pauses`: about 3 per minor collection, 5 per
-  major
 - `Parallel young collection pauses`, `Parallel full collection pauses`, `Serial young collection
   pauses`, `Serial full collection pauses`: one per collection
 
@@ -179,45 +195,58 @@ collections; it is not covered by the tests.
 
 ---
 
-**Metric:** `jvm_gc_pause_nanoseconds_total{gc}`, **Source:** `sun.gc.collector.N.time`, **Type:** counter\
+**Metric:** `jvm_gc_pause_nanoseconds_total{gc}`, **Source:** `sun.gc.collector.N.time`, **Type:**
+counter\
 **Usage:**
+
 - `rate(jvm_gc_pause_nanoseconds_total[1m]) / 1e9`: share of time in GC pauses, per collector
 - `rate(jvm_gc_pause_nanoseconds_total[5m]) / rate(jvm_gc_pauses_total[5m]) / 1e6`: average
   pause, ms, per collector
 
-**Description:** Total time of the pauses counted in `jvm_gc_pauses_total`. Concurrent work
-(G1's marking, almost all of ZGC's work) runs beside the application and is not included. A total
+**Description:** Total time of the pauses counted in `jvm_gc_pauses_total`. Concurrent work (almost
+all of ZGC's work, G1's marking) runs beside the application and is not included. ZGC's
+pauses take microseconds: measured, 15,820 minor pauses took 46 ms in total. A total
 only: no maximum or distribution of single pauses, so one long pause shows as a spike of the rate,
 not as its length; GC logs or JFR have each pause. Shenandoah: includes concurrent work, see above.
 
 ### Heap metrics
 
-**Metric:** `jvm_memory_heap_used_bytes`, **Source:** sum of `sun.gc.generation.N.space.M.used`, **Type:** gauge\
+**Metric:** `jvm_memory_heap_used_bytes`, **Source:** sum of `sun.gc.generation.N.space.M.used`,
+**Type:** gauge\
 **Usage:**
+
 - `jvm_memory_heap_used_bytes / jvm_memory_heap_max_bytes`: heap occupancy
 - `min_over_time(jvm_memory_heap_used_bytes[15m])`: the low point, close to the live data after
   GC; rising over hours suggests a leak
 
 **Description:** Heap occupied by objects, live ones and garbage not yet collected. When it changes
-depends on the collector: G1 follows allocation between GCs; ZGC, Parallel and Serial update it at
-GC only, so between GCs it holds the value of the last GC.
+depends on the collector: ZGC, Parallel and Serial update it at GC only, so between GCs it holds the
+value of the last GC; with ZGC that is close to the live data plus what was allocated during the
+cycle. G1 follows allocation between GCs.
 
 ---
 
-**Metric:** `jvm_memory_heap_committed_bytes`, **Source:** sum of `sun.gc.generation.N.capacity`, **Type:** gauge\
+**Metric:** `jvm_memory_heap_committed_bytes`, **Source:** sum of `sun.gc.generation.N.capacity`,
+**Type:** gauge\
 **Usage:**
+
 - `jvm_memory_heap_committed_bytes / jvm_memory_heap_max_bytes`: how far the heap has grown
+- `jvm_resident_memory_shared_bytes - jvm_memory_heap_committed_bytes`: mapped files, lower bound
+  (ZGC; exact with `-XX:+AlwaysPreTouch`)
 - `jvm_resident_memory_anon_bytes - jvm_memory_heap_committed_bytes`: non-heap memory, lower bound
   (G1, Parallel, Serial)
 
 **Description:** Heap memory taken from the OS. Constant when `-Xms` equals `-Xmx`, otherwise the GC
-grows and shrinks it. Resident only once touched, unless the JVM runs with `-XX:+AlwaysPreTouch`.
+grows and shrinks it (ZGC gives unused memory back after `-XX:ZUncommitDelay`, 300 s). Resident only
+once touched, unless the JVM runs with `-XX:+AlwaysPreTouch`.
 Parallel and Serial: both survivor spaces are included, while their `MemoryPoolMXBean`s show one.
 
 ---
 
-**Metric:** `jvm_memory_heap_max_bytes`, **Source:** `sun.gc.generation.N.maxCapacity` (all equal: that value, else their sum), **Type:** gauge\
+**Metric:** `jvm_memory_heap_max_bytes`, **Source:** `sun.gc.generation.N.maxCapacity` (all equal:
+that value, else their sum), **Type:** gauge\
 **Usage:**
+
 - `min_over_time(jvm_memory_heap_used_bytes[5m]) / jvm_memory_heap_max_bytes > 0.9`: the heap stays
   nearly full even after GCs
 
@@ -229,6 +258,7 @@ GCs and `OutOfMemoryError`.
 
 **Metric:** `jvm_threads_live`, **Source:** `java.threads.live`, **Type:** gauge\
 **Usage:**
+
 - `jvm_threads_live`: thread count
 - `delta(jvm_threads_live[1h]) > 0`: thread count still growing
 
@@ -241,6 +271,7 @@ Virtual threads are not counted; their carrier threads (`ForkJoinPool-1-worker-N
 
 **Metric:** `jvm_threads_daemon`, **Source:** `java.threads.daemon`, **Type:** gauge\
 **Usage:**
+
 - `jvm_threads_live - jvm_threads_daemon`: non-daemon threads, the ones that keep the JVM running
 
 **Description:** Live daemon threads, part of live.
@@ -249,6 +280,7 @@ Virtual threads are not counted; their carrier threads (`ForkJoinPool-1-worker-N
 
 **Metric:** `jvm_threads_peak`, **Source:** `java.threads.livePeak`, **Type:** gauge\
 **Usage:**
+
 - `jvm_threads_peak - jvm_threads_live`: how far above now the thread count has been
 
 **Description:** Highest live thread count since JVM start, or since
@@ -258,6 +290,7 @@ Virtual threads are not counted; their carrier threads (`ForkJoinPool-1-worker-N
 
 **Metric:** `jvm_threads_started_total`, **Source:** `java.threads.started`, **Type:** counter\
 **Usage:**
+
 - `rate(jvm_threads_started_total[5m])`: thread churn, threads started per second; near 0 in a
   steady state
 
@@ -268,6 +301,7 @@ not counted. Steady growth means threads are created per task instead of being p
 
 **Metric:** `jvm_memory_metaspace_used_bytes`, **Source:** `sun.gc.metaspace.used`, **Type:** gauge\
 **Usage:**
+
 - `delta(jvm_memory_metaspace_used_bytes[1h])`: class metadata growth; steady growth is classes
   generated and never unloaded (proxies, lambdas, scripts, redeploys)
 
@@ -278,8 +312,10 @@ out of it.
 
 ---
 
-**Metric:** `jvm_memory_metaspace_committed_bytes`, **Source:** `sun.gc.metaspace.capacity`, **Type:** gauge\
+**Metric:** `jvm_memory_metaspace_committed_bytes`, **Source:** `sun.gc.metaspace.capacity`,
+**Type:** gauge\
 **Usage:**
+
 - `jvm_memory_metaspace_committed_bytes - jvm_memory_metaspace_used_bytes`: committed but unused
 
 **Description:** Memory taken from the OS for class metadata, class space included; this is what
@@ -290,6 +326,7 @@ out of it.
 
 **Metric:** `jvm_resident_memory_bytes`, **Source:** `statm` resident, **Type:** gauge\
 **Usage:**
+
 - `jvm_resident_memory_bytes`: what the process takes in RAM
 - `max_over_time(jvm_resident_memory_bytes[1d])`: daily peak
 
@@ -302,37 +339,113 @@ the cgroup also charges page cache and `/dev/shm` files, and charges a page once
 
 ---
 
-**Metric:** `jvm_resident_memory_anon_bytes`, **Source:** `statm` resident − shared, **Type:** gauge\
+**Metric:** `jvm_resident_memory_anon_bytes`, **Source:** `statm` resident − shared, **Type:**
+gauge\
 **Usage:**
+
+- `jvm_resident_memory_anon_bytes`: non-heap memory (ZGC)
+- `jvm_resident_memory_anon_bytes - jvm_memory_metaspace_committed_bytes`: non-heap memory besides
+  metaspace (ZGC)
 - `jvm_resident_memory_anon_bytes - jvm_memory_heap_committed_bytes`: non-heap memory, lower bound
   (G1, Parallel, Serial)
 - `jvm_resident_memory_anon_bytes - jvm_memory_heap_used_bytes`: non-heap memory, upper bound (G1,
   Parallel, Serial)
-- `jvm_resident_memory_anon_bytes`: non-heap memory (ZGC)
-- `jvm_resident_memory_anon_bytes - jvm_memory_heap_committed_bytes - jvm_memory_metaspace_committed_bytes`:
-  non-heap memory besides metaspace, lower bound (G1, Parallel, Serial)
+-
+`jvm_resident_memory_anon_bytes - jvm_memory_heap_committed_bytes - jvm_memory_metaspace_committed_bytes`:
+non-heap memory besides metaspace, lower bound (G1, Parallel, Serial)
 
-**Description:** Resident memory not backed by a file: the heap (except ZGC), direct buffers and
-other native allocations, metaspace, JIT code cache, GC data structures, thread stacks. So anonymous
-minus heap is all non-heap memory of the JVM, not only direct buffers. It is a range because heap
-committed but never touched is not resident, unless the JVM runs with `-XX:+AlwaysPreTouch`.
+**Description:** Resident memory not backed by a file: direct buffers and other native
+allocations, metaspace, JIT code cache, GC data structures, thread stacks, and the heap of every
+collector but ZGC. With ZGC the heap is shared memory, so this is exactly the JVM's non-heap memory.
+With the others, anonymous minus heap is all non-heap memory, not only direct buffers, and it is a
+range because heap committed but never touched is not resident, unless the JVM runs with
+`-XX:+AlwaysPreTouch`.
 
 ---
 
 **Metric:** `jvm_resident_memory_shared_bytes`, **Source:** `statm` shared, **Type:** gauge\
 **Usage:**
-- `jvm_resident_memory_shared_bytes`: mapped files and libraries (G1, Parallel, Serial)
-- `jvm_resident_memory_shared_bytes - jvm_memory_heap_committed_bytes`: mapped files and
-  libraries (ZGC with `-XX:+AlwaysPreTouch`)
 
-**Description:** Resident memory backed by a file or shared memory: mapped files (e.g. Aeron log
-buffers in `/dev/shm`), the ZGC heap, the JVM's libraries, jars and CDS archive.
+- `jvm_resident_memory_shared_bytes - jvm_memory_heap_committed_bytes`: mapped files and
+  libraries (ZGC with `-XX:+AlwaysPreTouch`; without it, a lower bound)
+- `jvm_resident_memory_shared_bytes`: mapped files and libraries (G1, Parallel, Serial)
+
+**Description:** Resident memory backed by a file or shared memory: the ZGC heap, mapped files (e.g.
+Aeron log buffers in `/dev/shm`), the JVM's libraries, jars and CDS archive. ZGC's heap
+counts once it is touched: measured with a pre-touched 1 GiB heap, shared was the heap plus 22 MiB.
 
 ### Dashboards and alerts
 
 Queries for panels and alerts, by what they watch. Each one works per JVM (per series of labels the
 scrape adds); aggregate with `sum by`, `max by` as the dashboard needs. GC pause and safepoint
-counters reset when the JVM restarts; `rate` and `increase` handle that.
+counters reset when the JVM restarts; `rate` and `increase` handle that. ZGC first; the groups after
+it show ZGC's form of a query first where collectors differ.
+
+#### ZGC
+
+**Collections per second**
+
+```promql
+rate(jvm_gc_pauses_total{gc="ZGC minor collection pauses"}[5m]) / 3
+rate(jvm_gc_pauses_total{gc="ZGC major collection pauses"}[5m]) / 5
+```
+
+hsperfdata counts ZGC's pauses, not its collections: 3 pauses per minor (young) collection, about 5
+per major (young and old). Minor collections follow the allocation rate; a step up after a release
+is new allocation on the hot path. Majors come as old data grows, on `System.gc()`, and when the
+heap runs short.
+
+**Heap after the last collection**
+
+```promql
+jvm_memory_heap_used_bytes / jvm_memory_heap_max_bytes
+```
+
+ZGC updates heap used at the end of each collection only, so the value is the live data plus what
+was allocated while the collection ran: no `min_over_time` needed to see the live data. What is left
+up to the limit is what the application allocates into while ZGC marks and relocates concurrently.
+
+**Allocation stalls** (alert)
+
+```promql
+jvm_memory_heap_used_bytes / jvm_memory_heap_max_bytes > 0.9
+rate(jvm_gc_pauses_total{gc="ZGC minor collection pauses"}[5m]) / 3
+```
+
+When the application allocates faster than ZGC frees memory, the allocating threads wait for the
+collection: an allocation stall. It is not a pause and not a safepoint, and hsperfdata does not
+count it: measured, 71,081 stalls in the GC log in 10 s, and no hsperfdata entry but the GC counters
+changed. What shows is its cause: the heap stays near the limit after each collection, and
+collections run back to back (measured: 527 minor collections per second while stalling, against 17
+per second allocating as fast, with headroom). Each stall itself is in the GC log
+(`Allocation Stall`) and in JFR (`jdk.ZAllocationStall`).
+
+**Stop time**
+
+```promql
+rate(jvm_gc_pause_nanoseconds_total{gc=~"ZGC.*"}[5m]) / rate(jvm_gc_pauses_total{gc=~"ZGC.*"}[5m]) / 1e3
+(rate(jvm_safepoint_time_nanoseconds_total[5m]) + rate(jvm_safepoint_sync_time_nanoseconds_total[5m])) / 1e9
+```
+
+ZGC's pauses take microseconds on average (first line, µs; measured 3 µs), so GC pause time
+understates how long the application is stopped. Each pause is one safepoint, and the safepoint time
+and the time to reach it are the stop the application sees (second line, share of time): measured
+under heavy allocation, 49 ms of GC pause time against 426 ms at safepoints and 740 ms reaching
+them.
+
+**Memory** (stacked)
+
+```promql
+jvm_memory_heap_committed_bytes
+jvm_resident_memory_anon_bytes
+jvm_resident_memory_shared_bytes - jvm_memory_heap_committed_bytes
+```
+
+Heap, non-heap and mapped files. ZGC keeps the heap in shared memory, so anonymous memory is exactly
+the non-heap memory. With `-Xms` equal to `-Xmx` and `-XX:+AlwaysPreTouch` the heap is resident and
+fixed from the start (measured, a 1 GiB heap: shared was the heap plus 22 MiB) and the third line is
+exact; without pre-touch it is a lower bound. Without `-Xms` equal to `-Xmx` the heap grows under
+load, and ZGC gives unused memory back after `-XX:ZUncommitDelay` (300 s).
 
 #### Memory: where the process memory goes
 
@@ -350,17 +463,20 @@ memory. A heap flag that did not reach the JVM shows here first. The direct buff
 **Process memory against the container limit**
 
 ```promql
+(jvm_resident_memory_anon_bytes + jvm_memory_heap_committed_bytes) / on(pod, container) container_spec_memory_limit_bytes
 jvm_resident_memory_anon_bytes / on(pod, container) container_spec_memory_limit_bytes
 ```
 
-Anonymous memory cannot be given back to the kernel (without swap), so this part alone must stay
-well below the limit, with room left for the `/dev/shm` files (the join labels depend on the scrape
-setup; `container_spec_memory_limit_bytes` is cAdvisor's). The whole resident memory does not
-compare with the limit: a page mapped twice in the process (e.g. an Aeron log buffer, by an
-embedded driver and its client) counts twice in it and once in the container, and pages of files
-on disk can be reclaimed. For the out-of-memory alert itself, use the container's own working set.
+Memory the kernel cannot take back (without swap): with ZGC, non-heap plus the heap, which is shared
+memory but not backed by a file (first line, upper bound without pre-touch); with G1, Parallel and
+Serial, anonymous memory (second line). It must stay well below the limit, with room left for the
+`/dev/shm` files (the join labels depend on the scrape setup; `container_spec_memory_limit_bytes` is
+cAdvisor's). The whole resident memory does not compare with the limit: a page mapped twice in the
+process (e.g. an Aeron log buffer, by an embedded driver and its client) counts twice in it and once
+in the container, and pages of files on disk can be reclaimed. For the out-of-memory alert itself,
+use the container's own working set.
 
-**Memory breakdown** (stacked)
+**Memory breakdown** (stacked; ZGC: see Memory under ZGC)
 
 ```promql
 jvm_memory_heap_committed_bytes
@@ -372,14 +488,18 @@ jvm_resident_memory_shared_bytes
 Heap, metaspace, other native memory (direct buffers, thread stacks, JIT code cache, GC structures,
 native libraries' allocations), and mapped files. The third line is a lower bound: heap committed
 but never touched is not resident, unless the JVM runs with `-XX:+AlwaysPreTouch`. G1, Parallel and
-Serial; with ZGC the heap is in the shared line, and non-heap is `jvm_resident_memory_anon_bytes`.
+Serial.
 
 **Native memory growth**
 
 ```promql
+deriv(jvm_resident_memory_anon_bytes[6h])
+max_over_time(jvm_resident_memory_anon_bytes[1d])
 deriv((jvm_resident_memory_anon_bytes - jvm_memory_heap_committed_bytes)[6h:5m])
 max_over_time((jvm_resident_memory_anon_bytes - jvm_memory_heap_committed_bytes)[1d:5m])
 ```
+
+The first two lines for ZGC, the last two for G1, Parallel and Serial.
 
 Buffers allocated once at start (rings, preallocated message buffers) make a step at start and then
 a flat line: a positive slope hours after start is native memory allocated per request or per
@@ -392,55 +512,64 @@ At the direct buffer limit allocations fail, or the JDK runs a full GC first (se
 **Aeron log buffers**
 
 ```promql
+jvm_resident_memory_shared_bytes - jvm_memory_heap_committed_bytes
 jvm_resident_memory_shared_bytes
 deriv(jvm_resident_memory_shared_bytes[1h])
 ```
 
-With the media driver embedded, its files are in `/dev/shm` and mapped by this process. `cnc.dat`
-(46 MiB with Aeron 1.53 defaults) is resident from the start. Each publication and each image is a
-log buffer of three terms (16 MiB each by default, IPC 64 KiB), mapped by the driver and by the
-client: in this metric it counts twice, so a stream with 16 MiB terms adds 96 MiB once written
-through, while `/dev/shm` holds 48 MiB. Without pre-touch (`aeron.pre.touch.mapped.memory`) a new
-stream raises the line one term at a time until its log wraps, then it is flat. A client of an
-external driver counts its logs once, and the driver process once more.
+The first line for ZGC, whose heap is in shared memory too (with a pre-touched heap; without, a
+lower bound); the second for G1, Parallel and Serial. With the media driver embedded, its files are
+in `/dev/shm` and mapped by this process. `cnc.dat` (46 MiB with Aeron 1.53 defaults) is resident
+from the start. Each publication and each image is a log buffer of three terms (16 MiB each by
+default, IPC 64 KiB), mapped by the driver and by the client: in this metric it counts twice, so a
+stream with 16 MiB terms adds 96 MiB once written through, while `/dev/shm` holds 48 MiB. Without
+pre-touch (`aeron.pre.touch.mapped.memory`) a new stream raises the line one term at a time until
+its log wraps, then it is flat. A client of an external driver counts its logs once, and the driver
+process once more.
 
 **Aeron streams not released** (alert)
 
 ```promql
+deriv(min_over_time((jvm_resident_memory_shared_bytes - jvm_memory_heap_committed_bytes)[1h:5m])[1d:1h]) > 0
 deriv(min_over_time(jvm_resident_memory_shared_bytes[1h])[1d:1h]) > 0
 ```
 
-A closed publication or image is unmapped after its linger (publication linger 5 s, image liveness
-10 s by default), and the line comes back to where it was before the stream. A low point that rises
-day after day is streams that are opened and never closed (a publication per session, a
-subscription left open), each holding its log in `/dev/shm`.
+ZGC first, then G1, Parallel and Serial. A closed publication or image is unmapped after its linger
+(publication linger 5 s, image liveness 10 s by default), and the line comes back to where it was
+before the stream. A low point that rises day after day is streams that are opened and never closed
+(a publication per session, a subscription left open), each holding its log in `/dev/shm`.
 
 **Embedded database files**
 
 ```promql
-jvm_resident_memory_shared_bytes
-jvm_resident_memory_anon_bytes - jvm_memory_heap_committed_bytes
+jvm_resident_memory_shared_bytes - jvm_memory_heap_committed_bytes
+jvm_resident_memory_anon_bytes
 ```
 
-An embedded database that maps its table files (e.g. a time-series database with column files per
-partition): a query maps the partitions it reads, and they stay resident while the database keeps
-its readers open. Measured: +593 MiB after one query over 12 million rows in 60 partitions, given
-back only when the engine closed. These pages are files on disk, the kernel can drop them under
-memory pressure: high here is not a risk the way `/dev/shm` is. The database's own allocations
-(write buffers, query memory) are anonymous native memory, outside the direct buffer limit.
+Mapped files and non-heap memory, ZGC (G1, Parallel, Serial: `jvm_resident_memory_shared_bytes` and
+`jvm_resident_memory_anon_bytes - jvm_memory_heap_committed_bytes`). An embedded database that maps
+its table files (e.g. a time-series database with column files per partition): a query maps the
+partitions it reads, and they stay resident while the database keeps its readers open. Measured:
++593 MiB after one query over 12 million rows in 60 partitions, given back only when the engine
+closed. These pages are files on disk, the kernel can drop them under memory pressure: high here is
+not a risk the way `/dev/shm` is. The database's own allocations (write buffers, query memory) are
+anonymous native memory, outside the direct buffer limit.
 
 #### Heap: data held in memory
 
 **Live data**
 
 ```promql
+jvm_memory_heap_used_bytes / jvm_memory_heap_max_bytes
 min_over_time(jvm_memory_heap_used_bytes[1h]) / jvm_memory_heap_max_bytes
 ```
 
-The low point of heap used is close to the data that survives GC. Flat for a service whose heap
-comes and goes with requests; rising, then flat, for a service that holds data in memory (caches,
-histories, per-key state) until its bounds are reached. Near 1, the JVM ends in back-to-back full
-GCs and `OutOfMemoryError`.
+With ZGC heap used is the value at the end of the last collection, close to the live data as it is
+(first line). With G1, which follows allocation between GCs, the low point of heap used is close to
+the data that survives GC (second line; it works for ZGC too). Flat for a service whose heap comes
+and goes with requests; rising, then flat, for a service that holds data in memory (caches,
+histories, per-key state) until its bounds are reached. Near 1, ZGC stalls allocations (see
+Allocation stalls), G1 ends in back-to-back full GCs, and both in `OutOfMemoryError`.
 
 **Live data reaching the limit** (alert)
 
@@ -455,13 +584,15 @@ fit the heap, or a leak.
 
 ```promql
 jvm_memory_heap_committed_bytes / jvm_memory_heap_max_bytes
+jvm_resident_memory_shared_bytes - jvm_memory_heap_max_bytes
 jvm_resident_memory_anon_bytes - jvm_memory_heap_max_bytes
 ```
 
 A JVM that holds its data in memory runs with the heap fixed: `-Xms` equal to `-Xmx`, and
-`-XX:+AlwaysPreTouch`. Then the ratio is 1 from the start, and the whole heap is resident, so the
-second line is the exact non-heap memory instead of a range (G1, Parallel, Serial). A ratio below 1
-is a heap that grows under load: each step is GC work and new resident memory at the worst moment.
+`-XX:+AlwaysPreTouch`. Then the ratio is 1 from the start and the whole heap is resident. With ZGC
+the second line is then exactly the mapped files (non-heap is anonymous memory anyway); with G1,
+Parallel and Serial the third line is exactly the non-heap memory instead of a range. A ratio below
+1 is a heap that grows under load: each step is GC work and new resident memory at the worst moment.
 
 **Live data above the marking threshold** (G1)
 
@@ -476,7 +607,7 @@ next step is full GCs. Frequent cycles while live data stays low point to humong
 of half a region or more (a 256 MiB heap has 1 MiB regions, so from 512 KiB), e.g. buffers that grow
 by doubling, which count as occupied at once.
 
-**Young pauses and live data**
+**Young pauses and live data** (G1)
 
 ```promql
 rate(jvm_gc_pause_nanoseconds_total{gc="G1 young collection pauses"}[1h]) / rate(jvm_gc_pauses_total{gc="G1 young collection pauses"}[1h]) / 1e6
@@ -495,10 +626,10 @@ rate(jvm_gc_pauses_total[5m])
 jvm_memory_heap_used_bytes / jvm_memory_heap_max_bytes
 ```
 
-A service that first loads its data (a snapshot, a log replayed from its last position) allocates
-at full speed until it is live: GC rate and heap use are high in the first minutes, then fall to
-their steady level, with the live data at its new low point. Staying high means the load does not
-catch up, or the heap is too small for it.
+A service that first loads its data (a snapshot, a log replayed from its last position) allocates at
+full speed until it is live: GC rate and heap use are high in the first minutes, then fall to their
+steady level, with the live data at its new low point. Staying high means the load does not catch
+up, or the heap is too small for it.
 
 #### GC
 
@@ -508,8 +639,8 @@ catch up, or the heap is too small for it.
 sum without (gc) (rate(jvm_gc_pause_nanoseconds_total[5m])) / 1e9
 ```
 
-Share of time the application was stopped by GC pauses (0.01 = 1%). Concurrent GC work is not in
-it.
+Share of time the application was stopped by GC pauses (0.01 = 1%). Concurrent GC work is not in it.
+With ZGC it is near 0 even under stalls: see Stop time and Allocation stalls under ZGC.
 
 **GC frequency, against last week**
 
@@ -518,9 +649,10 @@ rate(jvm_gc_pauses_total[1h])
 rate(jvm_gc_pauses_total[1h]) / rate(jvm_gc_pauses_total[1h] offset 1w)
 ```
 
-Pauses per second, per collector. Young pauses follow the allocation rate: a service that keeps its
-hot path free of allocation (object pools, preallocated buffers) has few, and a step up after a
-release is new allocation on that path. The ratio compares with the same hour last week.
+Pauses per second, per collector. ZGC's minor and G1's young pauses follow the allocation rate: a
+service that keeps its hot path free of allocation (object pools, preallocated buffers) has few, and
+a step up after a release is new allocation on that path. The ratio compares with the same hour last
+week.
 
 **Average pause**
 
@@ -531,16 +663,17 @@ rate(jvm_gc_pause_nanoseconds_total[5m]) / rate(jvm_gc_pauses_total[5m]) / 1e6
 Milliseconds, per collector. Only the average: a single long pause raises it in its interval, the GC
 log or JFR has the pause itself.
 
-**Full GCs** (alert)
+**Full GCs** (alert; G1, Parallel, Serial)
 
 ```promql
 increase(jvm_gc_pauses_total{gc=~".*full.*"}[1h]) > 0
 ```
 
-A full GC stops everything and marks and compacts all live data: on a heap holding gigabytes of it,
-the pause takes seconds. Causes: the heap is full of live data, a call to `System.gc()`, the direct
-buffer limit is reached (the JDK runs a full GC before failing the allocation), a humongous
-allocation that does not fit.
+ZGC has no full GC: its major collection is concurrent, and what stops a G1 JVM for a full GC makes
+ZGC run majors and, when the heap is short, stall allocations. A full GC stops everything and marks
+and compacts all live data: on a heap holding gigabytes of it, the pause takes seconds. Causes: the
+heap is full of live data, a call to `System.gc()`, the direct buffer limit is reached (the JDK runs
+a full GC before failing the allocation), a humongous allocation that does not fit.
 
 **Collector in use**
 
@@ -549,8 +682,8 @@ count by (gc) (jvm_gc_pauses_total)
 ```
 
 The `gc` label names the collector. Without a collector flag the JVM picks Serial, not G1, when it
-sees fewer than 2 CPUs or less than 1792 MB of memory, which in a container means its limits,
-unless the JVM runs with `-XX:+AlwaysActAsServerClassMachine`.
+sees fewer than 2 CPUs or less than 1792 MB of memory, which in a container means its limits, unless
+the JVM runs with `-XX:+AlwaysActAsServerClassMachine`.
 
 #### Stopped time
 
@@ -574,15 +707,15 @@ itself on a healthy JVM. Grows when a Java thread is not on a CPU: more busy thr
 (threads spinning on dedicated cores, a thread layout made for more cores than the container has),
 CPU throttling, a busy neighbour on a shared core.
 
-**Stops that are not GC** (G1)
+**Stops that are not GC**
 
 ```promql
 rate(jvm_safepoints_total[5m]) - sum without (gc) (rate(jvm_gc_pauses_total[5m]))
 ```
 
 Safepoints for something else than GC: thread and heap dumps (over JMX, `jcmd`, `jstack`), class
-redefinition by agents. 0 when nobody inspects the JVM. G1 only: each G1 pause is one safepoint,
-while ZGC counts more pauses than safepoints.
+redefinition by agents. Near 0 when nobody inspects the JVM: each GC pause is one safepoint
+(measured, ZGC: 16,810 safepoints for 16,809 pauses; G1: equal).
 
 #### Threads
 
