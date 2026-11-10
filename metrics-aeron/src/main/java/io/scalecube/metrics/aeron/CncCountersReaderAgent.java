@@ -17,6 +17,7 @@ import java.util.ArrayList;
 import java.util.List;
 import org.agrona.BufferUtil;
 import org.agrona.collections.Int2ObjectHashMap;
+import org.agrona.collections.IntHashSet;
 import org.agrona.concurrent.Agent;
 import org.agrona.concurrent.EpochClock;
 import org.agrona.concurrent.UnsafeBuffer;
@@ -48,6 +49,11 @@ public class CncCountersReaderAgent implements Agent {
   private long nextReadTime;
   private final Int2ObjectHashMap<KeyConverter> keyConverters = new Int2ObjectHashMap<>();
   private State state = State.CLOSED;
+  // Converters get a heap copy of the key, never a view of cnc.dat: the file is unmapped after each
+  // read, so a key kept past it would read unmapped memory (SIGSEGV). Reused for every key: the
+  // converters build their own key and keep no reference to this one.
+  private final UnsafeBuffer keyBufferCopy =
+      new UnsafeBuffer(new byte[CountersReader.MAX_KEY_LENGTH]);
 
   /**
    * Constructor.
@@ -66,6 +72,36 @@ public class CncCountersReaderAgent implements Agent {
       EpochClock epochClock,
       Duration readInterval,
       CountersHandler countersHandler) {
+    this(
+        roleName,
+        aeronDirectoryName,
+        warnIfCncNotExists,
+        epochClock,
+        readInterval,
+        new IntHashSet(),
+        countersHandler);
+  }
+
+  /**
+   * Constructor.
+   *
+   * @param roleName roleName
+   * @param aeronDirectoryName aeronDirectoryName
+   * @param warnIfCncNotExists whether to log warning if counters file does not exist
+   * @param epochClock epochClock
+   * @param readInterval interval at which to read counters
+   * @param streamIds streams whose driver position counters are read ({@link
+   *     DriverCountersAdapter}); empty reads none
+   * @param countersHandler callback handler to process counters
+   */
+  public CncCountersReaderAgent(
+      String roleName,
+      String aeronDirectoryName,
+      boolean warnIfCncNotExists,
+      EpochClock epochClock,
+      Duration readInterval,
+      IntHashSet streamIds,
+      CountersHandler countersHandler) {
     this.roleName = roleName;
     this.aeronDirectoryName = aeronDirectoryName;
     this.warnIfCncNotExists = warnIfCncNotExists;
@@ -75,6 +111,7 @@ public class CncCountersReaderAgent implements Agent {
     ArchiveCountersAdapter.populate(keyConverters);
     ClusterCountersAdapter.populate(keyConverters);
     ClusteredServiceCountersAdapter.populate(keyConverters);
+    DriverCountersAdapter.populate(keyConverters, streamIds);
   }
 
   @Override
@@ -142,16 +179,15 @@ public class CncCountersReaderAgent implements Agent {
     countersReader.forEach(
         (counterId, typeId, keyBuffer, label) -> {
           final var keyConverter = keyConverters.get(typeId);
-          final var keyBufferCopy = new UnsafeBuffer(new byte[keyBuffer.capacity()]);
-          keyBuffer.getBytes(0, keyBufferCopy, 0, keyBufferCopy.capacity());
           if (keyConverter != null) {
-            counterDescriptors.add(
-                new CounterDescriptor(
-                    counterId,
-                    typeId,
-                    countersReader.getCounterValue(counterId),
-                    keyConverter.convert(keyBufferCopy, label),
-                    null));
+            keyBuffer.getBytes(0, keyBufferCopy, 0, keyBuffer.capacity());
+            // null: the converter skips this counter
+            final var key = keyConverter.convert(keyBufferCopy, label);
+            if (key != null) {
+              counterDescriptors.add(
+                  new CounterDescriptor(
+                      counterId, typeId, countersReader.getCounterValue(counterId), key, null));
+            }
           }
         });
     return counterDescriptors;
