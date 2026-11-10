@@ -11,7 +11,7 @@ import org.agrona.concurrent.BackoffIdleStrategy;
 import org.agrona.concurrent.SystemEpochClock;
 
 // Reads JVM metrics of another JVM (e.g. JvmMetricsSourceRunner) from outside: its hsperfdata
-// file and its /proc/<pid>/statm. Nothing is attached to the observed JVM.
+// file and its /proc/<pid>/statm. Nothing is attached to the target JVM.
 //
 // Usage: JvmMetricsReaderRunner <pid>
 public class JvmMetricsReaderRunner {

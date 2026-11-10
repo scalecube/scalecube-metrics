@@ -29,7 +29,7 @@ import org.slf4j.LoggerFactory;
 /**
  * Agent that periodically reads JVM metrics (safepoints, GC, heap, metaspace, threads) from HotSpot
  * {@code hsperfdata} file of another JVM (see {@link HsPerfData}), plus its resident memory from
- * {@code /proc/<pid>/statm}, and invokes {@link CountersHandler} with them. The observed JVM is not
+ * {@code /proc/<pid>/statm}, and invokes {@link CountersHandler} with them. The target JVM is not
  * touched: no attach, no code, no safepoints, no threads. Reading {@code statm} only takes the
  * kernel's per-task {@code task_lock} of the main thread for an instant to get its {@code mm}, and
  * then reads counters; {@code /proc/<pid>/status} would also take the process's signal lock.
@@ -101,8 +101,8 @@ public class JvmMetricsReaderAgent implements Agent {
    * Constructor.
    *
    * @param roleName roleName
-   * @param hsperfdataFile {@code hsperfdata} file of the observed JVM
-   * @param statmFile {@code /proc/<pid>/statm} file of the observed JVM, or null to skip resident
+   * @param hsperfdataFile {@code hsperfdata} file of the target JVM
+   * @param statmFile {@code /proc/<pid>/statm} file of the target JVM, or null to skip resident
    *     memory metrics
    * @param warnIfNotExists whether to log warning if {@code hsperfdata} file does not exist
    * @param epochClock epochClock
@@ -252,14 +252,13 @@ public class JvmMetricsReaderAgent implements Agent {
     }
 
     final var longs = hsPerfData.longs();
-    collectors.forEach(
-        (index, prefix) -> {
-          final var gc = hsPerfData.strings().get(prefix + ".name");
-          if (gc != null) {
-            add(counters, GC_COLLECTIONS, gc, longs.get(prefix + ".invocations"));
-            add(counters, GC_PAUSE, gc, toNanos(longs.get(prefix + ".time"), frequency));
-          }
-        });
+    collectors.forEach((index, prefix) -> {
+      final var gc = hsPerfData.strings().get(prefix + ".name");
+      if (gc != null) {
+        add(counters, GC_COLLECTIONS, gc, longs.get(prefix + ".invocations"));
+        add(counters, GC_PAUSE, gc, toNanos(longs.get(prefix + ".time"), frequency));
+      }
+    });
   }
 
   private static Long sum(Map<String, Long> longs, Pattern pattern) {
