@@ -108,20 +108,51 @@ class JvmMetricsReaderAgentTest {
     assertEquals(1000L, values.get(HEAP_COMMITTED));
   }
 
+  // After kill -9 or a crash the hsperfdata file stays, valid, with the last values
   @Test
-  void skipsResidentMemoryWhenStatmMissingOrMalformed() throws IOException {
+  void reportsNothingWhenStatmIsGone() throws IOException {
+    final var file = new File(tempDir, "1");
+    final var statm = new File(tempDir, "statm");
+    Files.write(file.toPath(), g1().buildBytes());
+    Files.writeString(statm.toPath(), "1000 300 100 5 0 200 0\n");
+    final var agent = newAgent(file, statm);
+
+    agent.doWork();
+    Files.delete(statm.toPath());
+    advanceAndWork(agent);
+
+    assertEquals(2, reads.size());
+    assertEquals(1000L, toMap(reads.get(0)).get(HEAP_COMMITTED));
+    assertEquals(List.of(), reads.get(1));
+  }
+
+  // A killed process its parent has not reaped yet (a zombie) keeps its statm, all zeros
+  @Test
+  void reportsNothingWhenStatmIsOfZombie() throws IOException {
+    final var file = new File(tempDir, "1");
+    final var statm = new File(tempDir, "statm");
+    Files.write(file.toPath(), g1().buildBytes());
+    Files.writeString(statm.toPath(), "0 0 0 0 0 0 0\n");
+    final var agent = newAgent(file, statm);
+
+    agent.doWork();
+
+    assertEquals(List.of(List.of()), reads);
+  }
+
+  @Test
+  void skipsResidentMemoryWhenStatmMalformed() throws IOException {
     final var file = new File(tempDir, "1");
     final var statm = new File(tempDir, "statm");
     Files.write(file.toPath(), g1().buildBytes());
     final var agent = newAgent(file, statm);
 
-    agent.doWork(); // statm missing: process exited after hsperfdata was read
     Files.writeString(statm.toPath(), "garbage\n");
-    advanceAndWork(agent);
+    agent.doWork();
     Files.writeString(statm.toPath(), "1000 x 100 5 0 200 0\n");
     advanceAndWork(agent);
 
-    assertEquals(3, reads.size());
+    assertEquals(2, reads.size());
     for (var read : reads) {
       final var values = toMap(read);
       assertEquals(1000L, values.get(HEAP_COMMITTED));
@@ -171,6 +202,21 @@ class JvmMetricsReaderAgentTest {
                 .longEntry("sun.gc.generation.0.maxCapacity", 341)
                 .longEntry("sun.gc.generation.1.maxCapacity", 683)
                 .longEntry("sun.gc.generation.2.maxCapacity", 0)
+                .build());
+
+    assertEquals(Map.of(HEAP_MAX, 1024L), toMap(JvmMetricsReaderAgent.toCounters(hsPerfData)));
+  }
+
+  // -XX:NewRatio=1: young and old maximums are equal, still two halves of the heap
+  @Test
+  void sumsHeapMaxWhenGenerationsSplitItEqually() {
+    final var hsPerfData =
+        HsPerfData.parse(
+            new HsPerfDataBuilder()
+                .stringEntry("sun.gc.collector.0.name", "Parallel young collection pauses")
+                .stringEntry("sun.gc.collector.1.name", "Parallel full collection pauses")
+                .longEntry("sun.gc.generation.0.maxCapacity", 512)
+                .longEntry("sun.gc.generation.1.maxCapacity", 512)
                 .build());
 
     assertEquals(Map.of(HEAP_MAX, 1024L), toMap(JvmMetricsReaderAgent.toCounters(hsPerfData)));

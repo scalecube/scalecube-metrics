@@ -73,7 +73,14 @@ reads the files it is given; finding them (e.g. through `/proc/<pid>/root`) is u
 Every read interval the file is mapped read-only, parsed and unmapped. Values go to a
 `CountersHandler` as `CounterDescriptor`s (metric name as label, `gc` tag for GC metrics), so
 `CountersPrometheusAdapter` exposes them as is. A missing, not yet initialised, or unsupported file
-yields an empty list, so the handler never keeps values of a JVM that has gone.
+yields an empty list.
+
+The JVM deletes its `hsperfdata` file on a clean exit only: after `kill -9`, an out-of-memory kill
+or a crash the file stays, valid, with the last values. With `statm` given, the agent takes an
+unreadable `statm`, or one with 0 resident pages (a killed process its parent has not reaped yet),
+as the process gone and yields an empty list. Without it, the agent cannot tell
+a gone JVM from a live one, and that is up to the caller; reading the file through
+`/proc/<pid>/root` does it, as that path goes away with the process.
 
 Times are converted from ticks with `sun.os.hrt.frequency`. The JVM updates values without a lock,
 so one read may mix values from just before and just after a GC: each value is right on its own,
@@ -243,8 +250,9 @@ Parallel and Serial: both survivor spaces are included, while their `MemoryPoolM
 
 ---
 
-**Metric:** `jvm_memory_heap_max_bytes`, **Source:** `sun.gc.generation.N.maxCapacity` (all equal:
-that value, else their sum), **Type:** gauge\
+**Metric:** `jvm_memory_heap_max_bytes`, **Source:** `sun.gc.generation.N.maxCapacity` (ZGC, G1,
+Shenandoah: the value every generation has, the whole heap; Parallel, Serial: their sum), **Type:**
+gauge\
 **Usage:**
 
 - `min_over_time(jvm_memory_heap_used_bytes[5m]) / jvm_memory_heap_max_bytes > 0.9`: the heap stays
@@ -372,7 +380,7 @@ range because heap committed but never touched is not resident, unless the JVM r
 
 **Description:** Resident memory backed by a file or shared memory: the ZGC heap, mapped files (e.g.
 Aeron log buffers in `/dev/shm`), the JVM's libraries, jars and CDS archive. ZGC's heap
-counts once it is touched: measured with a pre-touched 1 GiB heap, shared was the heap plus 22 MiB.
+counts once it is touched: measured with a pre-touched 1 GiB heap, shared was the heap plus about 20 MiB.
 
 ### Dashboards and alerts
 
@@ -443,7 +451,7 @@ jvm_resident_memory_shared_bytes - jvm_memory_heap_committed_bytes
 
 Heap, non-heap and mapped files. ZGC keeps the heap in shared memory, so anonymous memory is exactly
 the non-heap memory. With `-Xms` equal to `-Xmx` and `-XX:+AlwaysPreTouch` the heap is resident and
-fixed from the start (measured, a 1 GiB heap: shared was the heap plus 22 MiB) and the third line is
+fixed from the start (measured, a 1 GiB heap: shared was the heap plus about 20 MiB) and the third line is
 exact; without pre-touch it is a lower bound. Without `-Xms` equal to `-Xmx` the heap grows under
 load, and ZGC gives unused memory back after `-XX:ZUncommitDelay` (300 s).
 
@@ -521,8 +529,9 @@ The first line for ZGC, whose heap is in shared memory too (with a pre-touched h
 lower bound); the second for G1, Parallel and Serial. With the media driver embedded, its files are
 in `/dev/shm` and mapped by this process. `cnc.dat` (46 MiB with Aeron 1.53 defaults) is resident
 from the start. Each publication and each image is a log buffer of three terms (16 MiB each by
-default, IPC 64 KiB), mapped by the driver and by the client: in this metric it counts twice, so a
-stream with 16 MiB terms adds 96 MiB once written through, while `/dev/shm` holds 48 MiB. Without
+default, 64 MiB for IPC), mapped by the driver and by the client: in this metric it counts twice,
+so a stream with 16 MiB terms adds 96 MiB once written through, while `/dev/shm` holds 48 MiB; a
+default IPC stream adds 384 MiB, with 192 MiB in `/dev/shm`. Without
 pre-touch (`aeron.pre.touch.mapped.memory`) a new stream raises the line one term at a time until
 its log wraps, then it is flat. A client of an external driver counts its logs once, and the driver
 process once more.
@@ -772,7 +781,15 @@ time and not cached (proxies, generated serializers, scripts) and never unloaded
 
 ### Requirements and tests
 
-The target JVM must not run with `-XX:-UsePerfData` or `-XX:+PerfDisableSharedMem`.
+The target JVM needs nothing added, and must not run with `-XX:-UsePerfData` or
+`-XX:+PerfDisableSharedMem`. `hsperfdata` is a file the JVM keeps mapped and writes to: keep `/tmp`
+on tmpfs (in a container, a memory-backed volume): on a disk-backed `/tmp` the kernel's writeback
+of that file is a known cause of JVM stalls (not measured here), and `-XX:+PerfDisableSharedMem` is
+the usual way around it.
+
+The reader process (the one running the agent) needs
+`--add-opens java.base/jdk.internal.misc=ALL-UNNAMED` on JDK 25: Agrona reaches
+`jdk.internal.misc.Unsafe`, and fails at start with `IllegalAccessError` without it.
 
 The counter names are JDK internals and may change in any JDK release.
 `JvmMetricsReaderAgentJdkTest` checks every metric against an oracle that shares no code with the
@@ -782,5 +799,10 @@ javadoc lists the oracle and the test of each metric.
 ### Example
 
 In `metrics-examples` (Linux): start `io.scalecube.metrics.jvm.JvmMetricsSourceRunner` with
-`-Xmx64m`, a JVM holding a direct buffer and a mapped `/dev/shm` file; it prints its pid. Then
-`io.scalecube.metrics.jvm.JvmMetricsReaderRunner <pid>` prints its JVM metrics every 3 seconds.
+`-Xmx64m`, a JVM holding a direct buffer and a mapped `/dev/shm` file; it prints its pid. Then the
+reader prints its JVM metrics every 3 seconds:
+
+```
+java --add-opens java.base/jdk.internal.misc=ALL-UNNAMED -cp "app.jar:lib/*" \
+  io.scalecube.metrics.jvm.JvmMetricsReaderRunner <pid>
+```

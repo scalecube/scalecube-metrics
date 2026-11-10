@@ -45,10 +45,14 @@ import org.slf4j.LoggerFactory;
  * refreshes metaspace values at GC only (0 before the first GC).
  *
  * <p>Every read interval the file is mapped read-only, parsed and unmapped, nothing is kept between
- * reads. Missing, not yet initialized, or unsupported file results in empty list of counters, so
- * the handler never keeps values of a JVM that has gone. Each value is reported as {@link
- * CounterDescriptor} with metric name as label, and {@code gc} tag in the key for GC metrics. Times
- * are in nanoseconds.
+ * reads. Missing, not yet initialized, or unsupported file results in empty list of counters. The
+ * JVM deletes the file on a clean exit only: after {@code kill -9}, an out-of-memory kill or a
+ * crash it stays, valid, with the last values. With {@code statmFile} given, an unreadable {@code
+ * statm}, or one with 0 resident pages (a killed process not reaped yet, a zombie), means the
+ * process is gone and also results in empty list; without it, telling a gone JVM
+ * from a live one is up to the caller (e.g. reading the file through {@code /proc/<pid>/root},
+ * which goes away with the process). Each value is reported as {@link CounterDescriptor} with
+ * metric name as label, and {@code gc} tag in the key for GC metrics. Times are in nanoseconds.
  *
  * <p>The JVM updates the values without a lock, so one read can mix values from just before and
  * just after a GC. Each value is correct on its own, don't relate two values from the same read.
@@ -80,6 +84,8 @@ public class JvmMetricsReaderAgent implements Agent {
   private static final long PAGE_SIZE = UnsafeApi.pageSize();
   private static final Pattern COLLECTOR_INVOCATIONS =
       Pattern.compile("sun\\.gc\\.collector\\.(\\d+)\\.invocations");
+  private static final Pattern COLLECTOR_NAME =
+      Pattern.compile("sun\\.gc\\.collector\\.\\d+\\.name");
   private static final Pattern GENERATION_CAPACITY =
       Pattern.compile("sun\\.gc\\.generation\\.\\d+\\.capacity");
   private static final Pattern GENERATION_MAX_CAPACITY =
@@ -167,7 +173,12 @@ public class JvmMetricsReaderAgent implements Agent {
       }
       final var counters = toCounters(hsPerfData);
       if (statmFile != null) {
-        addResidentMemory(counters, readStatm());
+        final var statm = readStatm();
+        if (statm == null || isZombie(statm)) {
+          // the process is gone: after kill -9 or a crash its hsperfdata file stays, still valid
+          return List.of();
+        }
+        addResidentMemory(counters, statm);
       }
       return counters;
     } catch (IllegalArgumentException e) {
@@ -195,7 +206,7 @@ public class JvmMetricsReaderAgent implements Agent {
 
     add(counters, HEAP_USED, null, sum(longs, SPACE_USED));
     add(counters, HEAP_COMMITTED, null, sum(longs, GENERATION_CAPACITY));
-    add(counters, HEAP_MAX, null, heapMax(longs));
+    add(counters, HEAP_MAX, null, heapMax(hsPerfData));
 
     add(counters, THREADS_LIVE, null, longs.get("java.threads.live"));
     add(counters, THREADS_DAEMON, null, longs.get("java.threads.daemon"));
@@ -212,10 +223,16 @@ public class JvmMetricsReaderAgent implements Agent {
     try {
       return Files.readString(statmFile.toPath(), StandardCharsets.US_ASCII);
     } catch (IOException e) {
-      // the process exited after hsperfdata was read
       LOGGER.debug("[{}] cannot read {}: {}", roleName, statmFile, e.toString());
       return null;
     }
+  }
+
+  // A killed process its parent has not reaped yet keeps its statm, with every value 0; a live
+  // process always has resident pages
+  static boolean isZombie(String statm) {
+    final var fields = statm.trim().split("\\s+");
+    return fields.length >= 2 && fields[1].equals("0");
   }
 
   // "size resident shared text lib data dt", in pages
@@ -271,26 +288,34 @@ public class JvmMetricsReaderAgent implements Agent {
     return sum;
   }
 
-  // G1 and ZGC report whole heap as maxCapacity of every generation, Parallel and Serial split it
-  private static Long heapMax(Map<String, Long> longs) {
-    Long first = null;
+  // G1, ZGC and Shenandoah report the whole heap as maxCapacity of every generation; Parallel and
+  // Serial split it, also into equal halves (-XX:NewRatio=1), so equal values do not tell
+  private static Long heapMax(HsPerfData hsPerfData) {
+    Long max = null;
     long sum = 0;
-    var allEqual = true;
-    for (var entry : longs.entrySet()) {
+    for (var entry : hsPerfData.longs().entrySet()) {
       final var value = entry.getValue();
       if (value > 0 && GENERATION_MAX_CAPACITY.matcher(entry.getKey()).matches()) {
-        if (first == null) {
-          first = value;
-        } else if (value.longValue() != first) {
-          allEqual = false;
-        }
+        max = max == null ? value : Math.max(max, value);
         sum += value;
       }
     }
-    if (first == null) {
+    if (max == null) {
       return null;
     }
-    return allEqual ? first : sum;
+    return reportsWholeHeapPerGeneration(hsPerfData.strings()) ? max : sum;
+  }
+
+  private static boolean reportsWholeHeapPerGeneration(Map<String, String> strings) {
+    for (var entry : strings.entrySet()) {
+      if (COLLECTOR_NAME.matcher(entry.getKey()).matches()) {
+        final var gc = entry.getValue();
+        if (gc.startsWith("G1 ") || gc.startsWith("ZGC ") || gc.startsWith("Shenandoah")) {
+          return true;
+        }
+      }
+    }
+    return false;
   }
 
   private static Long toNanos(Long ticks, Long frequency) {

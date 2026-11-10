@@ -41,6 +41,7 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -88,7 +89,8 @@ import org.junit.jupiter.params.provider.CsvSource;
  *       #threadsMatchThreadMxBean()});
  *   <li>heap committed: heap {@code MemoryPoolMXBean}s, equal ({@link
  *       #heapCommittedMatchesJvmOwnValue()});
- *   <li>heap max: {@code -Xmx}, equal ({@link #heapMaxIsXmx()});
+ *   <li>heap max: {@code -Xmx}, equal, also with Parallel and Serial heaps split into equal halves
+ *       by {@code -XX:NewRatio=1} ({@link #heapMaxIsXmx()});
  *   <li>heap used: 64 MB made live, then garbage, followed at GC ({@link
  *       #heapUsedFollowsLiveData()});
  *   <li>metaspace used: classes loaded, as measured by the target JVM, within 1 MB at GC ({@link
@@ -102,7 +104,11 @@ import org.junit.jupiter.params.provider.CsvSource;
  *       parsing, page size, and anonymous = resident - shared;
  *   <li>anonymous and shared: a direct buffer, a mapped {@code /dev/shm} file and the pre-touched
  *       heap show up where documented ({@link #directBufferIsResidentAnonymousMemory()}, {@link
- *       #mappedFileIsResidentSharedMemory()}, {@link #preTouchedHeapIsResident()}).
+ *       #mappedFileIsResidentSharedMemory()}, {@link #preTouchedHeapIsResident()});
+ *   <li>a killed JVM: after {@code SIGKILL} its hsperfdata file stays with the last values, and the
+ *       agent reads nothing for it once {@code statm} is gone ({@link
+ *       #reportsNothingForKilledJvm()}), or while it is a zombie its parent has not reaped, with
+ *       {@code statm} all zeros ({@link #reportsNothingForKilledJvmNotReaped()}).
  * </ul>
  *
  * <p>Live values change between two reads, so a comparison holds when it holds for reads both
@@ -112,16 +118,16 @@ import org.junit.jupiter.params.provider.CsvSource;
  * <p>Shenandoah is not covered: its collectors ({@code partial}, {@code full}) do not map one to
  * one to its {@code GarbageCollectorMXBean}s.
  */
-@ParameterizedClass(name = "{0} {1}")
+@ParameterizedClass(name = "{0} {1} {2}")
 @CsvSource({
-  "-XX:+UseG1GC, -XX:-AlwaysPreTouch",
-  "-XX:+UseG1GC, -XX:+AlwaysPreTouch",
-  "-XX:+UseZGC, -XX:-AlwaysPreTouch",
-  "-XX:+UseZGC, -XX:+AlwaysPreTouch",
-  "-XX:+UseParallelGC, -XX:-AlwaysPreTouch",
-  "-XX:+UseParallelGC, -XX:+AlwaysPreTouch",
-  "-XX:+UseSerialGC, -XX:-AlwaysPreTouch",
-  "-XX:+UseSerialGC, -XX:+AlwaysPreTouch"
+  "-XX:+UseG1GC, -XX:-AlwaysPreTouch,",
+  "-XX:+UseG1GC, -XX:+AlwaysPreTouch,",
+  "-XX:+UseZGC, -XX:-AlwaysPreTouch,",
+  "-XX:+UseZGC, -XX:+AlwaysPreTouch,",
+  "-XX:+UseParallelGC, -XX:-AlwaysPreTouch, -XX:NewRatio=1",
+  "-XX:+UseParallelGC, -XX:+AlwaysPreTouch,",
+  "-XX:+UseSerialGC, -XX:-AlwaysPreTouch, -XX:NewRatio=1",
+  "-XX:+UseSerialGC, -XX:+AlwaysPreTouch,"
 })
 @TestInstance(Lifecycle.PER_CLASS)
 class JvmMetricsReaderAgentJdkTest {
@@ -178,6 +184,10 @@ class JvmMetricsReaderAgentJdkTest {
   @Parameter(1)
   private String preTouchFlag;
 
+  // -XX:NewRatio=1 splits Parallel and Serial heaps into equal young and old halves
+  @Parameter(2)
+  private String heapSplitFlag;
+
   @TempDir private Path tempDir;
 
   private final CachedEpochClock epochClock = new CachedEpochClock();
@@ -189,34 +199,49 @@ class JvmMetricsReaderAgentJdkTest {
 
   @BeforeParameterizedClassInvocation
   void startTargetJvm() throws Exception {
-    process =
-        new ProcessBuilder(
-                Path.of(System.getProperty("java.home"), "bin", "java").toString(),
-                gcFlag,
-                preTouchFlag,
-                "-Xms" + HEAP,
-                "-Xmx" + HEAP,
-                "--add-exports",
-                "jdk.internal.jvmstat/sun.jvmstat.monitor=ALL-UNNAMED",
-                "--add-exports",
-                "java.management/sun.management=ALL-UNNAMED",
-                "-cp",
-                Path.of(TargetJvm.class.getProtectionDomain().getCodeSource().getLocation().toURI())
-                    .toString(),
-                TargetJvm.class.getName())
-            .redirectError(ProcessBuilder.Redirect.INHERIT)
-            .start();
+    process = startJvm();
     in = new BufferedReader(new InputStreamReader(process.getInputStream()));
     out = new PrintStream(process.getOutputStream(), true);
     assertEquals("ready", in.readLine());
 
-    agent =
-        newAgent(
-            new File(
-                "/tmp/hsperfdata_" + System.getProperty("user.name"),
-                String.valueOf(process.pid())),
-            new File("/proc/" + process.pid() + "/statm"));
+    agent = newAgent(hsperfdataFile(process), statmFile(process));
     await("all metrics", values -> !values.isEmpty());
+  }
+
+  private Process startJvm() throws Exception {
+    return new ProcessBuilder(jvmCommand()).redirectError(ProcessBuilder.Redirect.INHERIT).start();
+  }
+
+  private List<String> jvmCommand() throws Exception {
+    final var command = new ArrayList<String>();
+    command.add(Path.of(System.getProperty("java.home"), "bin", "java").toString());
+    command.add(gcFlag);
+    command.add(preTouchFlag);
+    if (heapSplitFlag != null) {
+      command.add(heapSplitFlag);
+    }
+    command.addAll(
+        List.of(
+            "-Xms" + HEAP,
+            "-Xmx" + HEAP,
+            "--add-exports",
+            "jdk.internal.jvmstat/sun.jvmstat.monitor=ALL-UNNAMED",
+            "--add-exports",
+            "java.management/sun.management=ALL-UNNAMED",
+            "-cp",
+            Path.of(TargetJvm.class.getProtectionDomain().getCodeSource().getLocation().toURI())
+                .toString(),
+            TargetJvm.class.getName()));
+    return command;
+  }
+
+  private static File hsperfdataFile(Process process) {
+    return new File(
+        "/tmp/hsperfdata_" + System.getProperty("user.name"), String.valueOf(process.pid()));
+  }
+
+  private static File statmFile(Process process) {
+    return new File("/proc/" + process.pid() + "/statm");
   }
 
   @AfterParameterizedClassInvocation
@@ -226,6 +251,81 @@ class JvmMetricsReaderAgentJdkTest {
       if (!process.waitFor(10, TimeUnit.SECONDS)) {
         process.destroyForcibly().waitFor();
       }
+    }
+  }
+
+  // A killed JVM leaves its hsperfdata file behind, valid, with the last values; statm goes away
+  // with the process, so with statm given the agent reports nothing for it
+  @Test
+  void reportsNothingForKilledJvm() throws Exception {
+    final var killed = startJvm();
+    final var hsperfdata = hsperfdataFile(killed);
+    try {
+      assertEquals(
+          "ready", new BufferedReader(new InputStreamReader(killed.getInputStream())).readLine());
+      final var agentWithStatm = newAgent(hsperfdata, statmFile(killed));
+      assertTrue(read(agentWithStatm).keySet().containsAll(METRICS_FROM_STATM));
+
+      killed.destroyForcibly().waitFor(); // SIGKILL, no JVM shutdown
+
+      assertTrue(hsperfdata.exists(), "hsperfdata file left behind");
+      assertTrue(
+          read(newAgent(hsperfdata, null)).keySet().containsAll(METRICS_FROM_HSPERFDATA),
+          "without statm the last values are still there");
+      assertEquals(Map.of(), read(agentWithStatm));
+    } finally {
+      killed.destroyForcibly().waitFor();
+      Files.deleteIfExists(hsperfdata.toPath());
+    }
+  }
+
+  // A killed JVM its parent does not reap stays a zombie, and its statm stays, all zeros. Java reaps
+  // its own children, so the target JVM is started by a shell that turns into a sleep: its parent
+  // that never waits. The target's input is a pipe from another sleep, as it exits on end of input.
+  @Test
+  void reportsNothingForKilledJvmNotReaped() throws Exception {
+    final var command = new StringBuilder("sleep 120 | ");
+    jvmCommand().forEach(arg -> command.append('\'').append(arg).append("' "));
+    command.append("& echo $!; exec sleep 120");
+    final var parent =
+        new ProcessBuilder("sh", "-c", command.toString())
+            .redirectError(ProcessBuilder.Redirect.INHERIT)
+            .start();
+    File hsperfdata = null;
+    try {
+      final var parentOut = new BufferedReader(new InputStreamReader(parent.getInputStream()));
+      final var pid = parentOut.readLine().trim();
+      assertEquals("ready", parentOut.readLine());
+      hsperfdata = new File("/tmp/hsperfdata_" + System.getProperty("user.name"), pid);
+      final var statm = new File("/proc/" + pid + "/statm");
+      final var agentWithStatm = newAgent(hsperfdata, statm);
+      assertTrue(read(agentWithStatm).keySet().containsAll(METRICS_FROM_STATM));
+
+      ProcessHandle.of(Long.parseLong(pid)).orElseThrow().destroyForcibly();
+      awaitZombie(pid);
+
+      assertEquals("0 0 0 0 0 0 0", Files.readString(statm.toPath()).trim());
+      assertEquals(Map.of(), read(agentWithStatm));
+    } finally {
+      parent.descendants().forEach(ProcessHandle::destroyForcibly);
+      parent.destroyForcibly().waitFor();
+      if (hsperfdata != null) {
+        Files.deleteIfExists(hsperfdata.toPath());
+      }
+    }
+  }
+
+  // /proc/<pid>/stat: "pid (comm) state ...", state Z for a zombie
+  private static void awaitZombie(String pid) throws Exception {
+    final var stat = Path.of("/proc", pid, "stat");
+    final var deadline = System.nanoTime() + AWAIT_TIMEOUT.toNanos();
+    while (true) {
+      final var content = Files.readString(stat);
+      if (content.substring(content.lastIndexOf(')') + 2).startsWith("Z")) {
+        return;
+      }
+      assertTrue(System.nanoTime() < deadline, "not a zombie within " + AWAIT_TIMEOUT);
+      Thread.sleep(10);
     }
   }
 
