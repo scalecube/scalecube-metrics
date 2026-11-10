@@ -295,10 +295,10 @@ out of it.
 
 **Description:** Physical memory of the whole process (RSS): heap, metaspace, JIT code cache, GC
 data structures, thread stacks, direct buffers and other native memory, mapped files, libraries.
-Pages swapped out are not included. Only pages the process touched count, and a page shared with
-another process (e.g. an Aeron log buffer mapped by the media driver and its client) counts in
-both. Not the same as a container's memory usage: the cgroup also charges page cache and
-`/dev/shm` files, and charges a shared page once.
+Pages swapped out are not included. Only pages the process touched count, and a page counts once per
+mapping: an Aeron log buffer mapped by the media driver and its client counts in both processes,
+and twice in one process when the driver is embedded. Not the same as a container's memory usage:
+the cgroup also charges page cache and `/dev/shm` files, and charges a page once.
 
 ---
 
@@ -327,6 +327,315 @@ committed but never touched is not resident, unless the JVM runs with `-XX:+Alwa
 
 **Description:** Resident memory backed by a file or shared memory: mapped files (e.g. Aeron log
 buffers in `/dev/shm`), the ZGC heap, the JVM's libraries, jars and CDS archive.
+
+### Dashboards and alerts
+
+Queries for panels and alerts, by what they watch. Each one works per JVM (per series of labels the
+scrape adds); aggregate with `sum by`, `max by` as the dashboard needs. GC pause and safepoint
+counters reset when the JVM restarts; `rate` and `increase` handle that.
+
+#### Memory: where the process memory goes
+
+**Heap limit in effect**
+
+```promql
+jvm_memory_heap_max_bytes
+```
+
+The heap limit the JVM runs with. Without `-Xmx` it is a quarter of the container's memory limit
+(`-XX:MaxRAMPercentage=25`): a 1 GiB container gets a 256 MiB heap and the rest is left to non-heap
+memory. A heap flag that did not reach the JVM shows here first. The direct buffer limit
+(`-XX:MaxDirectMemorySize`) defaults to about the same value.
+
+**Process memory against the container limit**
+
+```promql
+jvm_resident_memory_anon_bytes / on(pod, container) container_spec_memory_limit_bytes
+```
+
+Anonymous memory cannot be given back to the kernel (without swap), so this part alone must stay
+well below the limit, with room left for the `/dev/shm` files (the join labels depend on the scrape
+setup; `container_spec_memory_limit_bytes` is cAdvisor's). The whole resident memory does not
+compare with the limit: a page mapped twice in the process (e.g. an Aeron log buffer, by an
+embedded driver and its client) counts twice in it and once in the container, and pages of files
+on disk can be reclaimed. For the out-of-memory alert itself, use the container's own working set.
+
+**Memory breakdown** (stacked)
+
+```promql
+jvm_memory_heap_committed_bytes
+jvm_memory_metaspace_committed_bytes
+jvm_resident_memory_anon_bytes - jvm_memory_heap_committed_bytes - jvm_memory_metaspace_committed_bytes
+jvm_resident_memory_shared_bytes
+```
+
+Heap, metaspace, other native memory (direct buffers, thread stacks, JIT code cache, GC structures,
+native libraries' allocations), and mapped files. The third line is a lower bound: heap committed
+but never touched is not resident, unless the JVM runs with `-XX:+AlwaysPreTouch`. G1, Parallel and
+Serial; with ZGC the heap is in the shared line, and non-heap is `jvm_resident_memory_anon_bytes`.
+
+**Native memory growth**
+
+```promql
+deriv((jvm_resident_memory_anon_bytes - jvm_memory_heap_committed_bytes)[6h:5m])
+max_over_time((jvm_resident_memory_anon_bytes - jvm_memory_heap_committed_bytes)[1d:5m])
+```
+
+Buffers allocated once at start (rings, preallocated message buffers) make a step at start and then
+a flat line: a positive slope hours after start is native memory allocated per request or per
+connection and not freed. Pooled network buffers grow with connections and in-flight data and are
+kept for reuse, so they follow the load peak: the daily peak is the figure to size the container by.
+At the direct buffer limit allocations fail, or the JDK runs a full GC first (see full GCs below).
+
+#### Off-heap: Aeron and mapped files
+
+**Aeron log buffers**
+
+```promql
+jvm_resident_memory_shared_bytes
+deriv(jvm_resident_memory_shared_bytes[1h])
+```
+
+With the media driver embedded, its files are in `/dev/shm` and mapped by this process. `cnc.dat`
+(46 MiB with Aeron 1.53 defaults) is resident from the start. Each publication and each image is a
+log buffer of three terms (16 MiB each by default, IPC 64 KiB), mapped by the driver and by the
+client: in this metric it counts twice, so a stream with 16 MiB terms adds 96 MiB once written
+through, while `/dev/shm` holds 48 MiB. Without pre-touch (`aeron.pre.touch.mapped.memory`) a new
+stream raises the line one term at a time until its log wraps, then it is flat. A client of an
+external driver counts its logs once, and the driver process once more.
+
+**Aeron streams not released** (alert)
+
+```promql
+deriv(min_over_time(jvm_resident_memory_shared_bytes[1h])[1d:1h]) > 0
+```
+
+A closed publication or image is unmapped after its linger (publication linger 5 s, image liveness
+10 s by default), and the line comes back to where it was before the stream. A low point that rises
+day after day is streams that are opened and never closed (a publication per session, a
+subscription left open), each holding its log in `/dev/shm`.
+
+**Embedded database files**
+
+```promql
+jvm_resident_memory_shared_bytes
+jvm_resident_memory_anon_bytes - jvm_memory_heap_committed_bytes
+```
+
+An embedded database that maps its table files (e.g. a time-series database with column files per
+partition): a query maps the partitions it reads, and they stay resident while the database keeps
+its readers open. Measured: +593 MiB after one query over 12 million rows in 60 partitions, given
+back only when the engine closed. These pages are files on disk, the kernel can drop them under
+memory pressure: high here is not a risk the way `/dev/shm` is. The database's own allocations
+(write buffers, query memory) are anonymous native memory, outside the direct buffer limit.
+
+#### Heap: data held in memory
+
+**Live data**
+
+```promql
+min_over_time(jvm_memory_heap_used_bytes[1h]) / jvm_memory_heap_max_bytes
+```
+
+The low point of heap used is close to the data that survives GC. Flat for a service whose heap
+comes and goes with requests; rising, then flat, for a service that holds data in memory (caches,
+histories, per-key state) until its bounds are reached. Near 1, the JVM ends in back-to-back full
+GCs and `OutOfMemoryError`.
+
+**Live data reaching the limit** (alert)
+
+```promql
+predict_linear(min_over_time(jvm_memory_heap_used_bytes[1h])[1d:1h], 7 * 86400) > jvm_memory_heap_max_bytes
+```
+
+The trend of the low point crosses the heap limit within a week: in-memory data whose bounds do not
+fit the heap, or a leak.
+
+**Heap fixed for the data**
+
+```promql
+jvm_memory_heap_committed_bytes / jvm_memory_heap_max_bytes
+jvm_resident_memory_anon_bytes - jvm_memory_heap_max_bytes
+```
+
+A JVM that holds its data in memory runs with the heap fixed: `-Xms` equal to `-Xmx`, and
+`-XX:+AlwaysPreTouch`. Then the ratio is 1 from the start, and the whole heap is resident, so the
+second line is the exact non-heap memory instead of a range (G1, Parallel, Serial). A ratio below 1
+is a heap that grows under load: each step is GC work and new resident memory at the worst moment.
+
+**Live data above the marking threshold** (G1)
+
+```promql
+rate(jvm_gc_pauses_total{gc="G1 concurrent cycle pauses"}[1h])
+min_over_time(jvm_memory_heap_used_bytes[1h]) / jvm_memory_heap_max_bytes
+```
+
+G1 starts a concurrent cycle when the heap fills to a threshold (45% at first, then adapted). With
+live data above it, cycles run back to back and the mixed collections after them free little; the
+next step is full GCs. Frequent cycles while live data stays low point to humongous objects: arrays
+of half a region or more (a 256 MiB heap has 1 MiB regions, so from 512 KiB), e.g. buffers that grow
+by doubling, which count as occupied at once.
+
+**Young pauses and live data**
+
+```promql
+rate(jvm_gc_pause_nanoseconds_total{gc="G1 young collection pauses"}[1h]) / rate(jvm_gc_pauses_total{gc="G1 young collection pauses"}[1h]) / 1e6
+min_over_time(jvm_memory_heap_used_bytes[1h])
+```
+
+A young pause copies what survives and scans references from old data into young: with a large
+in-memory data set that keeps changing (entries replaced, maps updated), the average young pause
+grows with the data. Pauses rising with live data mean the data set is too mutable for its size;
+flat pauses with growing data are fine.
+
+**Loading at start**
+
+```promql
+rate(jvm_gc_pauses_total[5m])
+jvm_memory_heap_used_bytes / jvm_memory_heap_max_bytes
+```
+
+A service that first loads its data (a snapshot, a log replayed from its last position) allocates
+at full speed until it is live: GC rate and heap use are high in the first minutes, then fall to
+their steady level, with the live data at its new low point. Staying high means the load does not
+catch up, or the heap is too small for it.
+
+#### GC
+
+**GC overhead**
+
+```promql
+sum without (gc) (rate(jvm_gc_pause_nanoseconds_total[5m])) / 1e9
+```
+
+Share of time the application was stopped by GC pauses (0.01 = 1%). Concurrent GC work is not in
+it.
+
+**GC frequency, against last week**
+
+```promql
+rate(jvm_gc_pauses_total[1h])
+rate(jvm_gc_pauses_total[1h]) / rate(jvm_gc_pauses_total[1h] offset 1w)
+```
+
+Pauses per second, per collector. Young pauses follow the allocation rate: a service that keeps its
+hot path free of allocation (object pools, preallocated buffers) has few, and a step up after a
+release is new allocation on that path. The ratio compares with the same hour last week.
+
+**Average pause**
+
+```promql
+rate(jvm_gc_pause_nanoseconds_total[5m]) / rate(jvm_gc_pauses_total[5m]) / 1e6
+```
+
+Milliseconds, per collector. Only the average: a single long pause raises it in its interval, the GC
+log or JFR has the pause itself.
+
+**Full GCs** (alert)
+
+```promql
+increase(jvm_gc_pauses_total{gc=~".*full.*"}[1h]) > 0
+```
+
+A full GC stops everything and marks and compacts all live data: on a heap holding gigabytes of it,
+the pause takes seconds. Causes: the heap is full of live data, a call to `System.gc()`, the direct
+buffer limit is reached (the JDK runs a full GC before failing the allocation), a humongous
+allocation that does not fit.
+
+**Collector in use**
+
+```promql
+count by (gc) (jvm_gc_pauses_total)
+```
+
+The `gc` label names the collector. Without a collector flag the JVM picks Serial, not G1, when it
+sees fewer than 2 CPUs or less than 1792 MB of memory, which in a container means its limits,
+unless the JVM runs with `-XX:+AlwaysActAsServerClassMachine`.
+
+#### Stopped time
+
+**Share of time stopped**
+
+```promql
+(rate(jvm_safepoint_time_nanoseconds_total[5m]) + rate(jvm_safepoint_sync_time_nanoseconds_total[5m])) / 1e9
+```
+
+Every stop of all Java threads (GC pauses and other safepoints), with the time it took them to stop.
+For a latency-sensitive service this is latency added to every message in flight at the time.
+
+**Time to safepoint**
+
+```promql
+rate(jvm_safepoint_sync_time_nanoseconds_total[5m]) / rate(jvm_safepoints_total[5m]) / 1e6
+```
+
+Average milliseconds from requesting a stop until the last thread stopped; well under the pause
+itself on a healthy JVM. Grows when a Java thread is not on a CPU: more busy threads than cores
+(threads spinning on dedicated cores, a thread layout made for more cores than the container has),
+CPU throttling, a busy neighbour on a shared core.
+
+**Stops that are not GC** (G1)
+
+```promql
+rate(jvm_safepoints_total[5m]) - sum without (gc) (rate(jvm_gc_pauses_total[5m]))
+```
+
+Safepoints for something else than GC: thread and heap dumps (over JMX, `jcmd`, `jstack`), class
+redefinition by agents. 0 when nobody inspects the JVM. G1 only: each G1 pause is one safepoint,
+while ZGC counts more pauses than safepoints.
+
+#### Threads
+
+**Thread count**
+
+```promql
+jvm_threads_live
+jvm_threads_live - jvm_threads_daemon
+```
+
+Live Java threads, and those of them that keep the JVM running. Threads started once (event loops,
+dedicated worker threads, schedulers) make a flat line after start.
+
+**Thread leak** (alert)
+
+```promql
+jvm_threads_live - min_over_time(jvm_threads_live[1d]) > 50
+```
+
+Threads above the daily base. Elastic pools (workers created for blocking work and ended when idle)
+add a burst and remove it; a level that keeps rising is threads that never end. The threshold
+depends on the pools' maximum.
+
+**Pool saturation**
+
+```promql
+jvm_threads_peak - min_over_time(jvm_threads_live[1d])
+```
+
+How many threads above the base the JVM has had at once. Close to the maximum of an elastic pool,
+its blocking work used all of it, and further tasks waited in its queue.
+
+**Thread churn**
+
+```promql
+rate(jvm_threads_started_total[1h])
+```
+
+Threads started per second. Elastic pools end idle workers and start new ones under the next burst,
+so some churn is normal; a steady rate with a flat thread count is a thread per task instead of a
+pool.
+
+#### Metaspace
+
+**Class metadata growth**
+
+```promql
+delta(jvm_memory_metaspace_used_bytes[1d])
+```
+
+Class loading happens at start; afterwards metaspace stays flat. Growth is classes generated at run
+time and not cached (proxies, generated serializers, scripts) and never unloaded. Without
+`-XX:MaxMetaspaceSize` it grows until the container runs out of memory.
 
 ### Requirements and tests
 
