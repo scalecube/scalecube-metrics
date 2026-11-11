@@ -167,6 +167,8 @@ public class CountersReaderAgent implements Agent {
     countersReader.forEach(
         (counterId, typeId, keyBuffer, label) -> {
           final var value = countersReader.getCounterValue(counterId);
+          // keyBuffer is a view of counters.dat. The descriptor outlives the mapping, which is
+          // released after each read (keepOpen=false) or on cleanup: reading it then is a SIGSEGV.
           final var keyBufferCopy = new UnsafeBuffer(new byte[keyBuffer.capacity()]);
           keyBuffer.getBytes(0, keyBufferCopy, 0, keyBufferCopy.capacity());
           final var counter = new CounterDescriptor(counterId, typeId, value, keyBufferCopy, label);
