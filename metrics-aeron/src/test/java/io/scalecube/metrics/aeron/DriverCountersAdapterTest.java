@@ -20,8 +20,8 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
+import java.util.function.IntPredicate;
 import org.agrona.CloseHelper;
-import org.agrona.collections.IntHashSet;
 import org.agrona.concurrent.SystemEpochClock;
 import org.agrona.concurrent.UnsafeBuffer;
 import org.junit.jupiter.api.AfterEach;
@@ -85,9 +85,7 @@ class DriverCountersAdapterTest {
 
   @Test
   void readsStreamPositionsOfSelectedStreamsOnly() {
-    final var streamIds = new IntHashSet();
-    streamIds.add(SELECTED_STREAM_ID);
-    final var cut = newAgent(streamIds);
+    final var cut = newAgent(DriverCountersAdapter.streams(SELECTED_STREAM_ID));
 
     final var counters = readCounters(cut);
 
@@ -114,6 +112,34 @@ class DriverCountersAdapterTest {
   }
 
   @Test
+  void readsStreamPositionsOfAllStreams() {
+    final var cut = newAgent(DriverCountersAdapter.ALL_STREAMS);
+
+    final var counters = readCounters(cut);
+
+    final var streamIds =
+        counters.stream()
+            .filter(c -> STREAM_POSITION_TYPE_IDS.contains(c.typeId()))
+            .map(c -> key(c).intValue("streamId"))
+            .toList();
+    assertEquals(
+        3, streamIds.stream().filter(id -> id == SELECTED_STREAM_ID).count(), streamIds::toString);
+    assertEquals(
+        3, streamIds.stream().filter(id -> id == OTHER_STREAM_ID).count(), streamIds::toString);
+  }
+
+  @Test
+  void readsNoStreamPositionsOfNoStreams() {
+    final var cut = newAgent(DriverCountersAdapter.streams());
+
+    final var counters = readCounters(cut);
+
+    assertTrue(
+        counters.stream().noneMatch(c -> STREAM_POSITION_TYPE_IDS.contains(c.typeId())),
+        counters::toString);
+  }
+
+  @Test
   void readsNoStreamPositionsByDefault() {
     final var cut =
         new CncCountersReaderAgent(
@@ -131,14 +157,14 @@ class DriverCountersAdapterTest {
         counters::toString);
   }
 
-  private CncCountersReaderAgent newAgent(IntHashSet streamIds) {
+  private CncCountersReaderAgent newAgent(IntPredicate streams) {
     return new CncCountersReaderAgent(
         "test",
         aeronDirectoryName,
         true,
         SystemEpochClock.INSTANCE,
         Duration.ZERO,
-        streamIds,
+        streams,
         countersHandler());
   }
 

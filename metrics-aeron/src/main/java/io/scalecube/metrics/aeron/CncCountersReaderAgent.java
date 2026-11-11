@@ -15,9 +15,9 @@ import java.nio.channels.FileChannel.MapMode;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.IntPredicate;
 import org.agrona.BufferUtil;
 import org.agrona.collections.Int2ObjectHashMap;
-import org.agrona.collections.IntHashSet;
 import org.agrona.concurrent.Agent;
 import org.agrona.concurrent.EpochClock;
 import org.agrona.concurrent.UnsafeBuffer;
@@ -78,7 +78,7 @@ public class CncCountersReaderAgent implements Agent {
         warnIfCncNotExists,
         epochClock,
         readInterval,
-        new IntHashSet(),
+        DriverCountersAdapter.NO_STREAMS,
         countersHandler);
   }
 
@@ -90,8 +90,9 @@ public class CncCountersReaderAgent implements Agent {
    * @param warnIfCncNotExists whether to log warning if counters file does not exist
    * @param epochClock epochClock
    * @param readInterval interval at which to read counters
-   * @param streamIds streams whose driver position counters are read ({@link
-   *     DriverCountersAdapter}); empty reads none
+   * @param streams selects the streams whose driver position counters are read: {@link
+   *     DriverCountersAdapter#NO_STREAMS}, {@link DriverCountersAdapter#ALL_STREAMS} or {@link
+   *     DriverCountersAdapter#streams(int...)}
    * @param countersHandler callback handler to process counters
    */
   public CncCountersReaderAgent(
@@ -100,7 +101,7 @@ public class CncCountersReaderAgent implements Agent {
       boolean warnIfCncNotExists,
       EpochClock epochClock,
       Duration readInterval,
-      IntHashSet streamIds,
+      IntPredicate streams,
       CountersHandler countersHandler) {
     this.roleName = roleName;
     this.aeronDirectoryName = aeronDirectoryName;
@@ -111,7 +112,7 @@ public class CncCountersReaderAgent implements Agent {
     ArchiveCountersAdapter.populate(keyConverters);
     ClusterCountersAdapter.populate(keyConverters);
     ClusteredServiceCountersAdapter.populate(keyConverters);
-    DriverCountersAdapter.populate(keyConverters, streamIds);
+    DriverCountersAdapter.populate(keyConverters, streams);
   }
 
   @Override
