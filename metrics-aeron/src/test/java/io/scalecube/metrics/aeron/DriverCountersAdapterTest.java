@@ -2,6 +2,7 @@ package io.scalecube.metrics.aeron;
 
 import static io.aeron.AeronCounters.DRIVER_PUBLISHER_POS_TYPE_ID;
 import static io.aeron.AeronCounters.DRIVER_RECEIVER_POS_TYPE_ID;
+import static io.aeron.AeronCounters.DRIVER_SENDER_POSITION_TYPE_ID;
 import static io.aeron.AeronCounters.DRIVER_SUBSCRIBER_POSITION_TYPE_ID;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -152,6 +153,39 @@ class DriverCountersAdapterTest {
 
     final var counters = readCounters(cut);
 
+    assertTrue(
+        counters.stream().noneMatch(c -> STREAM_POSITION_TYPE_IDS.contains(c.typeId())),
+        counters::toString);
+  }
+
+  @Test
+  void readsCustomStreamCounters() {
+    final var cut =
+        new CncCountersReaderAgent(
+            "test",
+            aeronDirectoryName,
+            true,
+            SystemEpochClock.INSTANCE,
+            Duration.ZERO,
+            DriverCountersAdapter.NO_STREAMS,
+            keyConverters ->
+                keyConverters.put(
+                    DRIVER_SENDER_POSITION_TYPE_ID,
+                    DriverCountersAdapter.streamCounter(
+                        "driver_sender_position",
+                        DriverCountersAdapter.streams(SELECTED_STREAM_ID))),
+            countersHandler());
+
+    final var counters = readCounters(cut);
+
+    final var senderPositions =
+        counters.stream().filter(c -> c.typeId() == DRIVER_SENDER_POSITION_TYPE_ID).toList();
+    assertEquals(1, senderPositions.size(), senderPositions::toString);
+    final var key = key(senderPositions.get(0));
+    assertEquals("driver_sender_position", key.stringValue("name"));
+    assertEquals(SELECTED_STREAM_ID, key.intValue("streamId"));
+    assertEquals(publication.sessionId(), key.intValue("sessionId"));
+    assertEquals(SELECTED_CHANNEL, key.stringValue("channel"));
     assertTrue(
         counters.stream().noneMatch(c -> STREAM_POSITION_TYPE_IDS.contains(c.typeId())),
         counters::toString);
