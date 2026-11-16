@@ -20,31 +20,31 @@ import org.agrona.DirectBuffer;
  */
 public record HsPerfData(Map<String, Long> longs, Map<String, String> strings) {
 
-  static final int MAGIC = 0xcafec0c0;
-  static final int SUPPORTED_MAJOR_VERSION = 2;
+  private static final int MAGIC = 0xcafec0c0;
+  private static final int SUPPORTED_MAJOR_VERSION = 2;
 
   // PerfDataPrologue
-  static final int MAGIC_OFFSET = 0;
-  static final int BYTE_ORDER_OFFSET = 4;
-  static final int MAJOR_VERSION_OFFSET = 5;
-  static final int ACCESSIBLE_OFFSET = 7;
-  static final int USED_OFFSET = 8;
-  static final int ENTRY_OFFSET_OFFSET = 24;
-  static final int NUM_ENTRIES_OFFSET = 28;
-  static final int PROLOGUE_LENGTH = 32;
+  private static final int MAGIC_OFFSET = 0;
+  private static final int BYTE_ORDER_OFFSET = 4;
+  private static final int MAJOR_VERSION_OFFSET = 5;
+  private static final int ACCESSIBLE_OFFSET = 7;
+  private static final int USED_OFFSET = 8;
+  private static final int ENTRY_OFFSET_OFFSET = 24;
+  private static final int NUM_ENTRIES_OFFSET = 28;
+  private static final int PROLOGUE_LENGTH = 32;
 
   // PerfDataEntry
-  static final int ENTRY_LENGTH_OFFSET = 0;
-  static final int NAME_OFFSET_OFFSET = 4;
-  static final int VECTOR_LENGTH_OFFSET = 8;
-  static final int DATA_TYPE_OFFSET = 12;
-  static final int DATA_UNITS_OFFSET = 14;
-  static final int DATA_OFFSET_OFFSET = 16;
-  static final int ENTRY_HEADER_LENGTH = 20;
+  private static final int ENTRY_LENGTH_OFFSET = 0;
+  private static final int NAME_OFFSET_OFFSET = 4;
+  private static final int VECTOR_LENGTH_OFFSET = 8;
+  private static final int DATA_TYPE_OFFSET = 12;
+  private static final int DATA_UNITS_OFFSET = 14;
+  private static final int DATA_OFFSET_OFFSET = 16;
+  private static final int ENTRY_HEADER_LENGTH = 20;
 
-  static final byte TYPE_LONG = 'J';
-  static final byte TYPE_BYTE = 'B';
-  static final byte UNITS_STRING = 5;
+  private static final byte TYPE_LONG = 'J';
+  private static final byte TYPE_BYTE = 'B';
+  private static final byte UNITS_STRING = 5;
 
   /**
    * Parses {@code hsperfdata} buffer.

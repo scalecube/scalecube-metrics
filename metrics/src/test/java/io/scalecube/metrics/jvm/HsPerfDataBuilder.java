@@ -1,34 +1,39 @@
 package io.scalecube.metrics.jvm;
 
-import static io.scalecube.metrics.jvm.HsPerfData.ACCESSIBLE_OFFSET;
-import static io.scalecube.metrics.jvm.HsPerfData.BYTE_ORDER_OFFSET;
-import static io.scalecube.metrics.jvm.HsPerfData.DATA_OFFSET_OFFSET;
-import static io.scalecube.metrics.jvm.HsPerfData.DATA_TYPE_OFFSET;
-import static io.scalecube.metrics.jvm.HsPerfData.DATA_UNITS_OFFSET;
-import static io.scalecube.metrics.jvm.HsPerfData.ENTRY_HEADER_LENGTH;
-import static io.scalecube.metrics.jvm.HsPerfData.ENTRY_LENGTH_OFFSET;
-import static io.scalecube.metrics.jvm.HsPerfData.ENTRY_OFFSET_OFFSET;
-import static io.scalecube.metrics.jvm.HsPerfData.MAGIC;
-import static io.scalecube.metrics.jvm.HsPerfData.MAGIC_OFFSET;
-import static io.scalecube.metrics.jvm.HsPerfData.MAJOR_VERSION_OFFSET;
-import static io.scalecube.metrics.jvm.HsPerfData.NAME_OFFSET_OFFSET;
-import static io.scalecube.metrics.jvm.HsPerfData.NUM_ENTRIES_OFFSET;
-import static io.scalecube.metrics.jvm.HsPerfData.PROLOGUE_LENGTH;
-import static io.scalecube.metrics.jvm.HsPerfData.TYPE_BYTE;
-import static io.scalecube.metrics.jvm.HsPerfData.TYPE_LONG;
-import static io.scalecube.metrics.jvm.HsPerfData.UNITS_STRING;
-import static io.scalecube.metrics.jvm.HsPerfData.USED_OFFSET;
-import static io.scalecube.metrics.jvm.HsPerfData.VECTOR_LENGTH_OFFSET;
-
 import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
 import org.agrona.concurrent.UnsafeBuffer;
 
-// Writes hsperfdata layout the way HotSpot perfMemory/perfData do
+// Writes hsperfdata layout the way HotSpot perfMemory/perfData do; the layout is taken from
+// HotSpot perfMemory.hpp, not from HsPerfData, so the parser is checked against the format itself
 class HsPerfDataBuilder {
 
   private static final int CAPACITY = 32 * 1024;
+  private static final int MAGIC = 0xcafec0c0;
+
+  // PerfDataPrologue
+  private static final int MAGIC_OFFSET = 0;
+  private static final int BYTE_ORDER_OFFSET = 4;
+  private static final int MAJOR_VERSION_OFFSET = 5;
+  private static final int ACCESSIBLE_OFFSET = 7;
+  private static final int USED_OFFSET = 8;
+  private static final int ENTRY_OFFSET_OFFSET = 24;
+  private static final int NUM_ENTRIES_OFFSET = 28;
+  private static final int PROLOGUE_LENGTH = 32;
+
+  // PerfDataEntry
+  private static final int ENTRY_LENGTH_OFFSET = 0;
+  private static final int NAME_OFFSET_OFFSET = 4;
+  private static final int VECTOR_LENGTH_OFFSET = 8;
+  private static final int DATA_TYPE_OFFSET = 12;
+  private static final int DATA_UNITS_OFFSET = 14;
+  private static final int DATA_OFFSET_OFFSET = 16;
+  private static final int ENTRY_HEADER_LENGTH = 20;
+
+  private static final byte TYPE_LONG = 'J';
+  private static final byte TYPE_BYTE = 'B';
   private static final byte UNITS_NONE = 1;
+  private static final byte UNITS_STRING = 5;
 
   private final UnsafeBuffer buffer = new UnsafeBuffer(new byte[CAPACITY]);
   private int offset = PROLOGUE_LENGTH;
