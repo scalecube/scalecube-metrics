@@ -49,10 +49,10 @@ import org.slf4j.LoggerFactory;
  * JVM deletes the file on a clean exit only: after {@code kill -9}, an out-of-memory kill or a
  * crash it stays, valid, with the last values. With {@code statmFile} given, an unreadable {@code
  * statm}, or one with 0 resident pages (a killed process not reaped yet, a zombie), means the
- * process is gone and also results in empty list; without it, telling a gone JVM
- * from a live one is up to the caller (e.g. reading the file through {@code /proc/<pid>/root},
- * which goes away with the process). Each value is reported as {@link CounterDescriptor} with
- * metric name as label, and {@code gc} tag in the key for GC metrics. Times are in nanoseconds.
+ * process is gone and also results in empty list; without it, telling a gone JVM from a live one is
+ * up to the caller (e.g. reading the file through {@code /proc/<pid>/root}, which goes away with
+ * the process). Each value is reported as {@link CounterDescriptor} with metric name as label, and
+ * {@code gc} tag in the key for GC metrics. Times are in nanoseconds.
  *
  * <p>The JVM updates the values without a lock, so one read can mix values from just before and
  * just after a GC. Each value is correct on its own, don't relate two values from the same read.
@@ -189,7 +189,7 @@ public class JvmMetricsReaderAgent implements Agent {
     }
   }
 
-  static List<CounterDescriptor> toCounters(HsPerfData hsPerfData) {
+  private static List<CounterDescriptor> toCounters(HsPerfData hsPerfData) {
     final var longs = hsPerfData.longs();
     final var frequency = longs.get("sun.os.hrt.frequency");
     final var counters = new ArrayList<CounterDescriptor>();
@@ -230,13 +230,13 @@ public class JvmMetricsReaderAgent implements Agent {
 
   // A killed process its parent has not reaped yet keeps its statm, with every value 0; a live
   // process always has resident pages
-  static boolean isZombie(String statm) {
+  private static boolean isZombie(String statm) {
     final var fields = statm.trim().split("\\s+");
     return fields.length >= 2 && fields[1].equals("0");
   }
 
   // "size resident shared text lib data dt", in pages
-  static void addResidentMemory(List<CounterDescriptor> counters, String statm) {
+  private static void addResidentMemory(List<CounterDescriptor> counters, String statm) {
     if (statm == null) {
       return;
     }

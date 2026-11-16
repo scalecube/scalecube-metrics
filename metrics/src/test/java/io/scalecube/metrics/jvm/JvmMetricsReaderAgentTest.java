@@ -1,7 +1,7 @@
 package io.scalecube.metrics.jvm;
 
-import static io.scalecube.metrics.jvm.JvmMetricsReaderAgent.GC_PAUSES;
 import static io.scalecube.metrics.jvm.JvmMetricsReaderAgent.GC_PAUSE;
+import static io.scalecube.metrics.jvm.JvmMetricsReaderAgent.GC_PAUSES;
 import static io.scalecube.metrics.jvm.JvmMetricsReaderAgent.GC_TAG;
 import static io.scalecube.metrics.jvm.JvmMetricsReaderAgent.HEAP_COMMITTED;
 import static io.scalecube.metrics.jvm.JvmMetricsReaderAgent.HEAP_MAX;
@@ -54,20 +54,18 @@ class JvmMetricsReaderAgentTest {
   @TempDir private File tempDir;
 
   @Test
-  void mapsAllMetrics() {
-    final var hsPerfData =
-        HsPerfData.parse(
-            g1().longEntry("sun.rt.safepoints", 7)
-                .longEntry("sun.rt.safepointTime", 1_500)
-                .longEntry("sun.rt.safepointSyncTime", 3)
-                .longEntry("java.threads.live", 20)
-                .longEntry("java.threads.daemon", 15)
-                .longEntry("java.threads.livePeak", 22)
-                .longEntry("java.threads.started", 30)
-                .longEntry("sun.gc.metaspace.used", 7_000)
-                .longEntry("sun.gc.metaspace.capacity", 8_000)
-                .longEntry("sun.gc.metaspace.maxCapacity", Long.MAX_VALUE)
-                .build());
+  void mapsAllMetrics() throws IOException {
+    final var hsperfdata =
+        g1().longEntry("sun.rt.safepoints", 7)
+            .longEntry("sun.rt.safepointTime", 1_500)
+            .longEntry("sun.rt.safepointSyncTime", 3)
+            .longEntry("java.threads.live", 20)
+            .longEntry("java.threads.daemon", 15)
+            .longEntry("java.threads.livePeak", 22)
+            .longEntry("java.threads.started", 30)
+            .longEntry("sun.gc.metaspace.used", 7_000)
+            .longEntry("sun.gc.metaspace.capacity", 8_000)
+            .longEntry("sun.gc.metaspace.maxCapacity", Long.MAX_VALUE);
 
     final var expected = new LinkedHashMap<String, Long>();
     expected.put(SAFEPOINTS, 7L);
@@ -87,7 +85,7 @@ class JvmMetricsReaderAgentTest {
     expected.put(METASPACE_USED, 7_000L);
     expected.put(METASPACE_COMMITTED, 8_000L);
 
-    assertEquals(expected, toMap(JvmMetricsReaderAgent.toCounters(hsPerfData)));
+    assertEquals(expected, toMap(read(hsperfdata)));
   }
 
   @Test
@@ -172,18 +170,16 @@ class JvmMetricsReaderAgentTest {
   }
 
   @Test
-  void takesCollectorsThatExist() {
-    final var hsPerfData =
-        HsPerfData.parse(
-            new HsPerfDataBuilder()
-                .longEntry("sun.os.hrt.frequency", 1_000_000_000)
-                .stringEntry("sun.gc.collector.2.name", "ZGC Major Pauses")
-                .longEntry("sun.gc.collector.2.invocations", 2)
-                .longEntry("sun.gc.collector.2.time", 20)
-                .stringEntry("sun.gc.collector.0.name", "ZGC Minor Pauses")
-                .longEntry("sun.gc.collector.0.invocations", 1)
-                .longEntry("sun.gc.collector.0.time", 10)
-                .build());
+  void takesCollectorsThatExist() throws IOException {
+    final var hsperfdata =
+        new HsPerfDataBuilder()
+            .longEntry("sun.os.hrt.frequency", 1_000_000_000)
+            .stringEntry("sun.gc.collector.2.name", "ZGC Major Pauses")
+            .longEntry("sun.gc.collector.2.invocations", 2)
+            .longEntry("sun.gc.collector.2.time", 20)
+            .stringEntry("sun.gc.collector.0.name", "ZGC Minor Pauses")
+            .longEntry("sun.gc.collector.0.invocations", 1)
+            .longEntry("sun.gc.collector.0.time", 10);
 
     final var expected = new LinkedHashMap<String, Long>();
     expected.put(GC_PAUSES + "{gc=ZGC Minor Pauses}", 1L);
@@ -191,41 +187,36 @@ class JvmMetricsReaderAgentTest {
     expected.put(GC_PAUSES + "{gc=ZGC Major Pauses}", 2L);
     expected.put(GC_PAUSE + "{gc=ZGC Major Pauses}", 20L);
 
-    assertEquals(expected, toMap(JvmMetricsReaderAgent.toCounters(hsPerfData)));
+    assertEquals(expected, toMap(read(hsperfdata)));
   }
 
   @Test
-  void sumsHeapMaxWhenGenerationsSplitIt() {
-    final var hsPerfData =
-        HsPerfData.parse(
-            new HsPerfDataBuilder()
-                .longEntry("sun.gc.generation.0.maxCapacity", 341)
-                .longEntry("sun.gc.generation.1.maxCapacity", 683)
-                .longEntry("sun.gc.generation.2.maxCapacity", 0)
-                .build());
+  void sumsHeapMaxWhenGenerationsSplitIt() throws IOException {
+    final var hsperfdata =
+        new HsPerfDataBuilder()
+            .longEntry("sun.gc.generation.0.maxCapacity", 341)
+            .longEntry("sun.gc.generation.1.maxCapacity", 683)
+            .longEntry("sun.gc.generation.2.maxCapacity", 0);
 
-    assertEquals(Map.of(HEAP_MAX, 1024L), toMap(JvmMetricsReaderAgent.toCounters(hsPerfData)));
+    assertEquals(Map.of(HEAP_MAX, 1024L), toMap(read(hsperfdata)));
   }
 
   // -XX:NewRatio=1: young and old maximums are equal, still two halves of the heap
   @Test
-  void sumsHeapMaxWhenGenerationsSplitItEqually() {
-    final var hsPerfData =
-        HsPerfData.parse(
-            new HsPerfDataBuilder()
-                .stringEntry("sun.gc.collector.0.name", "Parallel young collection pauses")
-                .stringEntry("sun.gc.collector.1.name", "Parallel full collection pauses")
-                .longEntry("sun.gc.generation.0.maxCapacity", 512)
-                .longEntry("sun.gc.generation.1.maxCapacity", 512)
-                .build());
+  void sumsHeapMaxWhenGenerationsSplitItEqually() throws IOException {
+    final var hsperfdata =
+        new HsPerfDataBuilder()
+            .stringEntry("sun.gc.collector.0.name", "Parallel young collection pauses")
+            .stringEntry("sun.gc.collector.1.name", "Parallel full collection pauses")
+            .longEntry("sun.gc.generation.0.maxCapacity", 512)
+            .longEntry("sun.gc.generation.1.maxCapacity", 512);
 
-    assertEquals(Map.of(HEAP_MAX, 1024L), toMap(JvmMetricsReaderAgent.toCounters(hsPerfData)));
+    assertEquals(Map.of(HEAP_MAX, 1024L), toMap(read(hsperfdata)));
   }
 
   @Test
-  void skipsMissingCounters() {
-    final var hsPerfData = HsPerfData.parse(new HsPerfDataBuilder().build());
-    assertEquals(List.of(), JvmMetricsReaderAgent.toCounters(hsPerfData));
+  void skipsMissingCounters() throws IOException {
+    assertEquals(List.of(), read(new HsPerfDataBuilder()));
   }
 
   @Test
@@ -278,6 +269,13 @@ class JvmMetricsReaderAgentTest {
     assertEquals(2, reads.size());
   }
 
+  private List<CounterDescriptor> read(HsPerfDataBuilder hsperfdata) throws IOException {
+    final var file = new File(tempDir, "1");
+    Files.write(file.toPath(), hsperfdata.buildBytes());
+    newAgent(file).doWork();
+    return reads.get(reads.size() - 1);
+  }
+
   private JvmMetricsReaderAgent newAgent(File file) {
     return newAgent(file, null);
   }
@@ -285,7 +283,13 @@ class JvmMetricsReaderAgentTest {
   private JvmMetricsReaderAgent newAgent(File file, File statm) {
     final var agent =
         new JvmMetricsReaderAgent(
-            "JvmMetricsReaderAgent", file, statm, false, epochClock, READ_INTERVAL, countersHandler);
+            "JvmMetricsReaderAgent",
+            file,
+            statm,
+            false,
+            epochClock,
+            READ_INTERVAL,
+            countersHandler);
     agent.onStart();
     return agent;
   }
