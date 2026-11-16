@@ -15,6 +15,7 @@ import java.nio.channels.FileChannel.MapMode;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Consumer;
 import java.util.function.IntPredicate;
 import org.agrona.BufferUtil;
 import org.agrona.collections.Int2ObjectHashMap;
@@ -103,6 +104,42 @@ public class CncCountersReaderAgent implements Agent {
       Duration readInterval,
       IntPredicate streams,
       CountersHandler countersHandler) {
+    this(
+        roleName,
+        aeronDirectoryName,
+        warnIfCncNotExists,
+        epochClock,
+        readInterval,
+        streams,
+        keyConverters -> {},
+        countersHandler);
+  }
+
+  /**
+   * Constructor.
+   *
+   * @param roleName roleName
+   * @param aeronDirectoryName aeronDirectoryName
+   * @param warnIfCncNotExists whether to log warning if counters file does not exist
+   * @param epochClock epochClock
+   * @param readInterval interval at which to read counters
+   * @param streams selects the streams whose driver position counters are read: {@link
+   *     DriverCountersAdapter#NO_STREAMS}, {@link DriverCountersAdapter#ALL_STREAMS} or {@link
+   *     DriverCountersAdapter#streams(int...)}
+   * @param customKeyConverters registers more converters by counter type id, after the default
+   *     ones, which it may replace (e.g. {@link
+   *     DriverCountersAdapter#streamPositionCounter(String, IntPredicate)})
+   * @param countersHandler callback handler to process counters
+   */
+  public CncCountersReaderAgent(
+      String roleName,
+      String aeronDirectoryName,
+      boolean warnIfCncNotExists,
+      EpochClock epochClock,
+      Duration readInterval,
+      IntPredicate streams,
+      Consumer<Int2ObjectHashMap<KeyConverter>> customKeyConverters,
+      CountersHandler countersHandler) {
     this.roleName = roleName;
     this.aeronDirectoryName = aeronDirectoryName;
     this.warnIfCncNotExists = warnIfCncNotExists;
@@ -113,6 +150,7 @@ public class CncCountersReaderAgent implements Agent {
     ClusterCountersAdapter.populate(keyConverters);
     ClusteredServiceCountersAdapter.populate(keyConverters);
     DriverCountersAdapter.populate(keyConverters, streams);
+    customKeyConverters.accept(keyConverters);
   }
 
   @Override

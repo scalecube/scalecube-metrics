@@ -74,16 +74,26 @@ public class DriverCountersAdapter {
     if (streams == NO_STREAMS) {
       return;
     }
-    final var adapter = new DriverCountersAdapter(streams);
     map.put(
-        DRIVER_PUBLISHER_POS_TYPE_ID,
-        (keyBuffer, label) -> adapter.convert("driver_publisher_position", keyBuffer));
+        DRIVER_PUBLISHER_POS_TYPE_ID, streamPositionCounter("driver_publisher_position", streams));
     map.put(
-        DRIVER_RECEIVER_POS_TYPE_ID,
-        (keyBuffer, label) -> adapter.convert("driver_receiver_position", keyBuffer));
+        DRIVER_RECEIVER_POS_TYPE_ID, streamPositionCounter("driver_receiver_position", streams));
     map.put(
         DRIVER_SUBSCRIBER_POSITION_TYPE_ID,
-        (keyBuffer, label) -> adapter.convert("driver_subscriber_position", keyBuffer));
+        streamPositionCounter("driver_subscriber_position", streams));
+  }
+
+  /**
+   * Converter of any driver counter keyed by a {@code StreamCounter}, e.g. {@code snd-pos} or
+   * {@code snd-lmt}, with the tags above.
+   *
+   * @param name metric name
+   * @param streams selects the streams to convert the counters of
+   * @return the converter; it skips counters of other streams
+   */
+  public static KeyConverter streamPositionCounter(String name, IntPredicate streams) {
+    final var adapter = new DriverCountersAdapter(streams);
+    return (keyBuffer, label) -> adapter.convert(name, keyBuffer);
   }
 
   /**
