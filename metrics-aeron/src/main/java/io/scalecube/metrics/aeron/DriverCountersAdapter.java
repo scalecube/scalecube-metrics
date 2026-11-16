@@ -52,7 +52,7 @@ public class DriverCountersAdapter {
    * @param streamIds stream ids; none selects no stream
    * @return the selection
    */
-  public static IntPredicate streamFilter(int... streamIds) {
+  public static IntPredicate streams(int... streamIds) {
     if (streamIds.length == 0) {
       return NO_STREAMS;
     }
@@ -68,7 +68,7 @@ public class DriverCountersAdapter {
    *
    * @param map converters by counter type id
    * @param streams selects the streams to convert the counters of, e.g. {@link #ALL_STREAMS},
-   *     {@link #streamFilter(int...)}
+   *     {@link #streams(int...)}
    */
   public static void populate(Int2ObjectHashMap<KeyConverter> map, IntPredicate streams) {
     if (streams == NO_STREAMS) {
