@@ -86,7 +86,7 @@ class DriverCountersAdapterTest {
 
   @Test
   void readsStreamPositionsOfSelectedStreamsOnly() {
-    final var cut = newAgent(DriverCountersAdapter.streams(SELECTED_STREAM_ID));
+    final var cut = newAgent(DriverCountersAdapter.streamFilter(SELECTED_STREAM_ID));
 
     final var counters = readCounters(cut);
 
@@ -131,7 +131,7 @@ class DriverCountersAdapterTest {
 
   @Test
   void readsNoStreamPositionsOfNoStreams() {
-    final var cut = newAgent(DriverCountersAdapter.streams());
+    final var cut = newAgent(DriverCountersAdapter.streamFilter());
 
     final var counters = readCounters(cut);
 
@@ -171,9 +171,9 @@ class DriverCountersAdapterTest {
             keyConverters ->
                 keyConverters.put(
                     DRIVER_SENDER_POSITION_TYPE_ID,
-                    DriverCountersAdapter.streamCounter(
+                    DriverCountersAdapter.streamPositionCounter(
                         "driver_sender_position",
-                        DriverCountersAdapter.streams(SELECTED_STREAM_ID))),
+                        DriverCountersAdapter.streamFilter(SELECTED_STREAM_ID))),
             countersHandler());
 
     final var counters = readCounters(cut);

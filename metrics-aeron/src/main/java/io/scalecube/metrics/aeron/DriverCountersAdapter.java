@@ -52,7 +52,7 @@ public class DriverCountersAdapter {
    * @param streamIds stream ids; none selects no stream
    * @return the selection
    */
-  public static IntPredicate streams(int... streamIds) {
+  public static IntPredicate streamFilter(int... streamIds) {
     if (streamIds.length == 0) {
       return NO_STREAMS;
     }
@@ -68,17 +68,19 @@ public class DriverCountersAdapter {
    *
    * @param map converters by counter type id
    * @param streams selects the streams to convert the counters of, e.g. {@link #ALL_STREAMS},
-   *     {@link #streams(int...)}
+   *     {@link #streamFilter(int...)}
    */
   public static void populate(Int2ObjectHashMap<KeyConverter> map, IntPredicate streams) {
     if (streams == NO_STREAMS) {
       return;
     }
     map.put(
-        DRIVER_PUBLISHER_POS_TYPE_ID, streamCounter("driver_publisher_position", streams));
-    map.put(DRIVER_RECEIVER_POS_TYPE_ID, streamCounter("driver_receiver_position", streams));
+        DRIVER_PUBLISHER_POS_TYPE_ID, streamPositionCounter("driver_publisher_position", streams));
     map.put(
-        DRIVER_SUBSCRIBER_POSITION_TYPE_ID, streamCounter("driver_subscriber_position", streams));
+        DRIVER_RECEIVER_POS_TYPE_ID, streamPositionCounter("driver_receiver_position", streams));
+    map.put(
+        DRIVER_SUBSCRIBER_POSITION_TYPE_ID,
+        streamPositionCounter("driver_subscriber_position", streams));
   }
 
   /**
@@ -89,7 +91,7 @@ public class DriverCountersAdapter {
    * @param streams selects the streams to convert the counters of
    * @return the converter; it skips counters of other streams
    */
-  public static KeyConverter streamCounter(String name, IntPredicate streams) {
+  public static KeyConverter streamPositionCounter(String name, IntPredicate streams) {
     final var adapter = new DriverCountersAdapter(streams);
     return (keyBuffer, label) -> adapter.convert(name, keyBuffer);
   }

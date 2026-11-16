@@ -93,7 +93,7 @@ public class CncCountersReaderAgent implements Agent {
    * @param readInterval interval at which to read counters
    * @param streams selects the streams whose driver position counters are read: {@link
    *     DriverCountersAdapter#NO_STREAMS}, {@link DriverCountersAdapter#ALL_STREAMS} or {@link
-   *     DriverCountersAdapter#streams(int...)}
+   *     DriverCountersAdapter#streamFilter(int...)}
    * @param countersHandler callback handler to process counters
    */
   public CncCountersReaderAgent(
@@ -125,10 +125,10 @@ public class CncCountersReaderAgent implements Agent {
    * @param readInterval interval at which to read counters
    * @param streams selects the streams whose driver position counters are read: {@link
    *     DriverCountersAdapter#NO_STREAMS}, {@link DriverCountersAdapter#ALL_STREAMS} or {@link
-   *     DriverCountersAdapter#streams(int...)}
+   *     DriverCountersAdapter#streamFilter(int...)}
    * @param customKeyConverters registers more converters by counter type id, after the default
-   *     ones, which it may replace (e.g. {@link DriverCountersAdapter#streamCounter(String,
-   *     IntPredicate)})
+   *     ones, which it may replace (e.g. {@link
+   *     DriverCountersAdapter#streamPositionCounter(String, IntPredicate)})
    * @param countersHandler callback handler to process counters
    */
   public CncCountersReaderAgent(
